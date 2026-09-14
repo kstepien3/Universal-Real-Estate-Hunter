@@ -6,6 +6,39 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.11.0 (2026-09-14)
+
+### Bug Fixes
+
+- **ai**: Ensure ollama preset normalizes url and does not inherit stale lmstudio port 1234
+  ([`0a1d24a`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/0a1d24a9bf5b3eeebecf873212c3f6f16292dc3d))
+
+- **ai**: Only probe and display configured LLM provider during test connection
+  ([`418c90d`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/418c90d2b1a1fed8eb084827db997cfffd652ac7))
+
+### Features
+
+- Implement re-listing detection & extract due-diligence dashboard module
+  ([`4a27d2f`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/4a27d2f3ddbfb5b8b75139c8efeb0e7a746de3e6))
+
+- **ai**: Add hardware-aware Ollama recommendations, Bielik support, and tok/s diagnostics
+  ([`52f9de3`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/52f9de3612cd6ff6afda2ef0852af7e8e188ff5b))
+
+- **ai**: Support local OpenAI-compatible servers (LM Studio, vLLM, Docker Model Runner)
+  ([`3e8b930`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/3e8b930dfb8e6346b6286e26e7bfdbdee206f1af))
+
+- **ai**: Unify local LLM configuration with presets and add cloud timeout
+  ([`0536771`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/053677175f9516f6925bce1eed360c7eecc6b9a2))
+
+### Refactoring
+
+- **ai**: Remove container-skewed hardware profiling in favor of real server metrics
+  ([`be233eb`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/be233eb7ca0950632f867eeb402e5a1ac190896b))
+
+- **ui**: Remove unnecessary local LLM API key field from modal
+  ([`9ca1ce8`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/9ca1ce83d4eff82413b813c13341af5fdeb2e50e))
+
+
 ## v1.10.3 (2026-09-14)
 
 ### Refactoring
