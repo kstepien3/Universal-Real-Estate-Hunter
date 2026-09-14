@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -162,6 +163,9 @@ async def test_live_dashboard_listings_includes_gunb_and_gesut():
             is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True
         )
         model, _, _ = await repo.save_or_update(listing, filt)
+        now_dt = datetime.now(UTC)
+        model.created_at = now_dt
+        model.last_scraped_at = now_dt
         model.parcel_id = "181609_2.0001.2643/7"
         model.cadastral_area = 1000.0
         model.geoportal_url = "https://mapy.geoportal.gov.pl/imap/Imgp_2.html?identifyParcel=181609_2.0001.2643/7"

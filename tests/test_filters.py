@@ -916,7 +916,7 @@ async def test_qualification_engine_deep_spatial_evaluation():
     # Verify pros and cons
     assert any("Miejscowy Plan" in p for p in res.pros)
     assert any("Światłowód aktywny FTTH" in p for p in res.pros)
-    assert any("Stacja kolejowa PKA" in p for p in res.pros)
+    assert any("Stacja kolejowa" in p for p in res.pros)
     assert any("Zidentyfikowano działkę w Geoportalu" in p for p in res.pros)
 
     assert any("Zagrożenie powodziowe" in c for c in res.cons)

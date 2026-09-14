@@ -22,9 +22,7 @@ from src.models.listing import ListingSchema
 
 from .base import BaseScraper
 
-OTODOM_BASE_SEARCH_URL = (
-    "https://www.otodom.pl/pl/wyniki/sprzedaz/dom/podkarpackie/rzeszow/rzeszow/rzeszow?distanceRadius=15&limit=36"
-)
+OTODOM_BASE_URL = "https://www.otodom.pl/"
 
 
 class OtodomScraper(BaseScraper):
@@ -204,7 +202,7 @@ class OtodomScraper(BaseScraper):
         else:
             url = f"https://www.otodom.pl/pl/oferta/{slug_or_url}"
 
-        html = await self.fetch_html(url, referer=OTODOM_BASE_SEARCH_URL)
+        html = await self.fetch_html(url, referer=OTODOM_BASE_URL)
         if not html:
             return {}
 
@@ -260,7 +258,7 @@ class OtodomScraper(BaseScraper):
 
             reverse_geocoding = (location_obj.get("reverseGeocoding") or {}).get("locations", [])
             geo_parts = [loc.get("name") for loc in reverse_geocoding if loc.get("name")]
-            fallback_city = getattr(self.profile, "city", None) or "Rzeszów"
+            fallback_city = getattr(self.profile, "city", None) or ""
             location_raw = ", ".join(geo_parts) or f"{city_name or fallback_city}, {district_name or ''}".strip(", ")
 
             # Images

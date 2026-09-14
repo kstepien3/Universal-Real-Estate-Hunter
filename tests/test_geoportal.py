@@ -69,6 +69,117 @@ async def test_get_mpzp_info_missing():
 
 
 @pytest.mark.asyncio
+async def test_get_mpzp_info_rzeszow_html_tables():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = (
+        "<TABLE border=1 width=100%><TR><TH width=25%>Layer</TH>"
+        "<TD>mpzp_przeznaczenie_d0bec3b4</TD></TR>"
+        "<TR><TH>SYMBOL</TH><TD>ZC</TD></TR>"
+        "<TR><TH>OPIS</TH><TD>Teren cmentarza komunalnego</TD></TR>"
+        "<TR><TH>UCHWALA</TH><TD>XXVII/418/2008</TD></TR></TABLE>"
+        "<TABLE border=1 width=100%><TR><TH>NAZWA</TH><TD>MIASTA RZESZOWA</TD></TR>"
+        "<TR><TH>NAZWA2</TH><TD>MPZP przy Cmentarzu Komunalnym Wilkowyja</TD></TR></TABLE>"
+    )
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_mpzp_info(client_mock, 100.0, 200.0)
+    assert res["status"] == "OBOWIĄZUJĄCY"
+    assert res["symbol"] == "ZC"
+    assert "ZC: Teren cmentarza komunalnego" in res["zone"]
+    assert res["plan_name"] == "MPZP przy Cmentarzu Komunalnym Wilkowyja"
+
+
+@pytest.mark.asyncio
+async def test_get_mpzp_info_raster_plan():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = (
+        "<table><tr class='row'><th class='cell blue'>Identyfikator</th>"
+        "<td class='cell'>PL.ZIPPZP.2506_186301-MPZP_50_granica</td></tr>"
+        "<tr class='row'><th class='cell blue'>Poziom informatyzacji</th>"
+        "<td class='cell'>rastrowy</td></tr>"
+        "<tr class='row'><th class='cell blue'>Nazwa planu</th>"
+        "<td class='cell'>MPZP Nr 75/5/2004 przy al. Cieplińskiego w Rzeszowie</td></tr></table>"
+        "<hr/>m. Rzeszów: brak wyniku dla wskazanego obszaru"
+    )
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_mpzp_info(client_mock, 100.0, 200.0)
+    assert res["status"] == "OBOWIĄZUJĄCY"
+    assert res["level"] == "rastrowy"
+    assert "MPZP Nr 75/5/2004" in res["plan_name"]
+
+
+@pytest.mark.asyncio
+async def test_get_mpzp_info_esri_table():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = (
+        "<html xmlns:esri_wms='http://www.esri.com/wms'>"
+        "<h5>FeatureInfoCollection - layer name: 'Przeznaczenia MPZP'</h5>"
+        "<table><tbody><tr>"
+        "<th>id_pg</th><th>Uchwalenie</th><th>Oznaczenie</th><th>Nazwa MPZP</th>"
+        "<th>opis_oznac</th></tr>"
+        "<tr><td>3499</td><td>XII/131/11</td><td>KP.1</td><td>STARE MIASTO</td>"
+        "<td>Tereny placów miejskich</td></tr></tbody></table></html>"
+    )
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_mpzp_info(client_mock, 100.0, 200.0)
+    assert res["status"] == "OBOWIĄZUJĄCY"
+    assert res["symbol"] == "KP.1"
+    assert "KP.1: Tereny placów miejskich" in res["zone"]
+    assert res["plan_name"] == "STARE MIASTO"
+
+
+@pytest.mark.asyncio
+async def test_get_mpzp_info_cp1250_decoding():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    raw = (
+        "<table><tr class='row'><th class='cell blue'>Poziom informatyzacji</th>"
+        "<td class='cell'>rastrowy</td></tr>"
+        "<tr class='row'><th class='cell blue'>Nazwa planu</th>"
+        "<td class='cell'>Plan dla terenów lasów i zalesień</td></tr>"
+        "<tr class='row'><th class='cell blue'>Uchwała</th>"
+        "<td class='cell'>III/22/2002</td></tr></table>"
+    ).encode("cp1250")
+    mock_resp.content = raw
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_mpzp_info(client_mock, 100.0, 200.0)
+    assert res["status"] == "OBOWIĄZUJĄCY"
+    assert res["level"] == "rastrowy"
+    assert "lasów i zalesień" in res["plan_name"]
+
+
+@pytest.mark.asyncio
+async def test_get_mpzp_info_unknown_rows_not_false_brak():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = (
+        "<GetFeatureInfo_Result><ROWSET name='MPZP_PRZEZNACZENIE_TERENU'>"
+        "<ROW num='1'><NIEZNANE_POLE>dane</NIEZNANE_POLE></ROW></ROWSET></GetFeatureInfo_Result>"
+    )
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_mpzp_info(client_mock, 100.0, 200.0)
+    assert res["status"] == "NIEZNANY"
+    assert res["zone"] is None
+
+
+@pytest.mark.asyncio
 async def test_get_flood_risk_isok_hazard():
     svc = GeoportalService()
     mock_resp = MagicMock()

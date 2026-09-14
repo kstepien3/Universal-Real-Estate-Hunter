@@ -191,13 +191,12 @@ CITY_CENTROIDS = {
 def slugify_city(text: str) -> str:
     """Converts a Polish city name into a clean URL slug (e.g. 'Głogów Małopolski' -> 'glogow-malopolski')."""
     if not text:
-        return "rzeszow"
+        return ""
     result = []
     for ch in text.strip():
         result.append(POLISH_CHAR_MAP.get(ch, ch))
     slug = "".join(result).lower()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
-    return slug or "rzeszow"
+    return re.sub(r"[^a-z0-9]+", "-", slug).strip("-")
 
 
 class ScraperConfig(BaseModel):
@@ -443,7 +442,7 @@ class SearchProfile(BaseModel):
 
     def get_city_center(self) -> tuple[float, float]:
         slug = self.city_slug
-        return CITY_CENTROIDS.get(slug, (50.0375, 22.0047))
+        return CITY_CENTROIDS.get(slug, (52.0693, 19.4803))
 
 
 class SearchConfig(BaseModel):

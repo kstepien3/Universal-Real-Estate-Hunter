@@ -643,12 +643,31 @@ class LLMAnalyzer:
         if listing.mpzp_zone:
             spatial_lines.append(f"MPZP zoning: {listing.mpzp_zone} (status: {listing.mpzp_status or 'nieznany'})")
         elif listing.parcel_id:
-            spatial_lines.append("MPZP zoning: Brak planu lub brak danych cyfrowych (wymagane WZ)")
+            if listing.mpzp_status == "NIEZNANY":
+                spatial_lines.append("MPZP zoning: Nieustalony (błąd pobierania danych — wymaga ręcznej weryfikacji)")
+            else:
+                spatial_lines.append("MPZP zoning: Brak planu lub brak danych cyfrowych (wymagane WZ)")
 
         if listing.flood_risk_zone:
             spatial_lines.append(f"Flood risk (ISOK): {listing.flood_risk_zone}")
         elif listing.parcel_id:
             spatial_lines.append("Flood risk (ISOK): Poza strefą bezpośredniego zagrożenia")
+
+        if listing.air_aqi is not None or listing.air_pm25_heating_avg is not None:
+            aq_parts = []
+            if listing.air_aqi is not None:
+                aq_parts.append(f"Europejski AQI: {listing.air_aqi} ({listing.air_aqi_label or 'b/d'})")
+            if listing.air_pm25_heating_avg is not None:
+                aq_parts.append(f"PM2.5 zima (ogrzewanie): {listing.air_pm25_heating_avg:.1f} µg/m³")
+            if listing.air_pm25_summer_avg is not None:
+                aq_parts.append(f"PM2.5 lato: {listing.air_pm25_summer_avg:.1f} µg/m³")
+            if listing.air_smog_days is not None:
+                aq_parts.append(f"Dni smogowe: {listing.air_smog_days}/rok")
+            if listing.air_gios_station:
+                dist_str = f" (~{listing.air_gios_dist_km:.1f} km)" if listing.air_gios_dist_km else ""
+                idx_str = f" (indeks: {listing.air_gios_index})" if listing.air_gios_index else ""
+                aq_parts.append(f"Stacja GIOŚ: {listing.air_gios_station}{dist_str}{idx_str}")
+            spatial_lines.append(f"Jakość powietrza i smog (CAMS + GIOŚ): {'; '.join(aq_parts)}")
 
         spatial_block = "\n".join(spatial_lines)
         template = load_prompt_template()

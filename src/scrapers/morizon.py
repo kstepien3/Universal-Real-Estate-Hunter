@@ -22,7 +22,7 @@ from src.models.listing import ListingSchema
 
 from .base import BaseScraper
 
-MORIZON_BASE = "https://www.morizon.pl/domy/rzeszow/"
+MORIZON_BASE = "https://www.morizon.pl/"
 
 
 class MorizonScraper(BaseScraper):
@@ -248,17 +248,20 @@ class MorizonScraper(BaseScraper):
 
             # Location & Street
             loc_el = card.select_one('[data-cy="propertyCardLocation"]') or card.select_one(".property-card__location")
-            default_city = getattr(self.profile, "city", None) or "Rzeszów"
+            default_city = getattr(self.profile, "city", None) or ""
             location_raw = loc_el.get_text(" ", strip=True) if loc_el else default_city
 
             street = None
             district = None
+            city = None
             parts = [p.strip() for p in location_raw.split(",") if p.strip()]
             if len(parts) >= 3:
                 street = parts[0]
                 district = parts[1]
+                city = parts[2]
             elif len(parts) == 2:
                 district = parts[0]
+                city = parts[1]
 
             # Description
             desc_el = (
@@ -363,6 +366,7 @@ class MorizonScraper(BaseScraper):
                 location_raw=location_raw,
                 street=street,
                 district=district,
+                city=city,
                 access_road_type=RoadType.NIEZNANA,
                 market=market,
                 finish_condition=FinishCondition.NIEOKRESLONY,

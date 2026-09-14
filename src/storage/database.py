@@ -234,153 +234,148 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-async def _migrate_sqlite_columns(conn) -> None:
-    """Safely adds missing columns to existing SQLite tables."""
+LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
+    # (column_name, sqlite_type_def, postgresql_type_def)
+    ("is_exact_coords", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
+    ("user_status", "VARCHAR(30) DEFAULT 'NEW'", "VARCHAR(30) DEFAULT 'NEW'"),
+    ("user_notes", "TEXT", "TEXT"),
+    ("finish_condition", "VARCHAR(50) DEFAULT 'nieokreślony'", "VARCHAR(50) DEFAULT 'nieokreślony'"),
+    ("has_visualisations", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
+    ("sewerage", "VARCHAR(50) DEFAULT 'nieznana'", "VARCHAR(50) DEFAULT 'nieznana'"),
+    ("heating", "VARCHAR(50) DEFAULT 'nieznane'", "VARCHAR(50) DEFAULT 'nieznane'"),
+    ("has_fiber", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
+    ("category", "VARCHAR(50) DEFAULT 'dom'", "VARCHAR(50) DEFAULT 'dom'"),
+    ("rooms", "INTEGER", "INTEGER"),
+    ("floor", "INTEGER", "INTEGER"),
+    ("floors_in_building", "INTEGER", "INTEGER"),
+    ("last_scraped_at", "DATETIME", "TIMESTAMP WITH TIME ZONE"),
+    ("is_private_owner", "BOOLEAN", "BOOLEAN"),
+    ("profile_id", "VARCHAR(100)", "VARCHAR(100)"),
+    ("profile_name", "VARCHAR(100)", "VARCHAR(100)"),
+    ("gallery_images", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("parcel_id", "VARCHAR(100)", "VARCHAR(100)"),
+    ("cadastral_area", "FLOAT", "DOUBLE PRECISION"),
+    ("geoportal_url", "VARCHAR(500)", "VARCHAR(500)"),
+    ("ai_summary", "TEXT", "TEXT"),
+    ("ai_questions", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("contact_phone", "VARCHAR(50)", "VARCHAR(50)"),
+    ("contact_person", "VARCHAR(150)", "VARCHAR(150)"),
+    ("ai_verdict", "TEXT", "TEXT"),
+    ("worth_interest", "BOOLEAN", "BOOLEAN"),
+    ("mpzp_zone", "VARCHAR(250)", "VARCHAR(250)"),
+    ("mpzp_status", "VARCHAR(50)", "VARCHAR(50)"),
+    ("flood_risk_zone", "VARCHAR(100)", "VARCHAR(100)"),
+    ("gesut_networks", "TEXT", "TEXT"),
+    ("landslide_risk", "VARCHAR(100)", "VARCHAR(100)"),
+    ("egib_building_status", "VARCHAR(100)", "VARCHAR(100)"),
+    ("egib_soil_class", "VARCHAR(100)", "VARCHAR(100)"),
+    ("noise_level_db", "FLOAT", "DOUBLE PRECISION"),
+    ("noise_zone", "VARCHAR(100)", "VARCHAR(100)"),
+    ("nature_protected_zone", "VARCHAR(250)", "VARCHAR(250)"),
+    ("monument_zone", "VARCHAR(250)", "VARCHAR(250)"),
+    ("cemetery_buffer_zone", "VARCHAR(100)", "VARCHAR(100)"),
+    ("broadband_status", "VARCHAR(100)", "VARCHAR(100)"),
+    ("broadband_details", "VARCHAR(250)", "VARCHAR(250)"),
+    ("parcel_front_width_m", "FLOAT", "DOUBLE PRECISION"),
+    ("parcel_length_m", "FLOAT", "DOUBLE PRECISION"),
+    ("parcel_aspect_ratio", "FLOAT", "DOUBLE PRECISION"),
+    ("parcel_shape_type", "VARCHAR(100)", "VARCHAR(100)"),
+    ("terrain_slope_pct", "FLOAT", "DOUBLE PRECISION"),
+    ("terrain_aspect", "VARCHAR(50)", "VARCHAR(50)"),
+    ("walkability_pka_dist_m", "INTEGER", "INTEGER"),
+    ("walkability_pka_name", "VARCHAR(150)", "VARCHAR(150)"),
+    ("power_lines_risk", "VARCHAR(150)", "VARCHAR(150)"),
+    ("air_aqi", "INTEGER", "INTEGER"),
+    ("air_aqi_label", "VARCHAR(50)", "VARCHAR(50)"),
+    ("air_pm25_heating_avg", "FLOAT", "DOUBLE PRECISION"),
+    ("air_pm25_summer_avg", "FLOAT", "DOUBLE PRECISION"),
+    ("air_smog_days", "INTEGER", "INTEGER"),
+    ("air_gios_station", "VARCHAR(150)", "VARCHAR(150)"),
+    ("air_gios_dist_km", "FLOAT", "DOUBLE PRECISION"),
+    ("air_gios_index", "VARCHAR(50)", "VARCHAR(50)"),
+    ("air_smog_risk", "VARCHAR(50)", "VARCHAR(50)"),
+    ("desc_hash", "VARCHAR(64)", "VARCHAR(64)"),
+    ("llm_json", "TEXT", "TEXT"),
+    ("llm_prompt_version", "VARCHAR(50)", "VARCHAR(50)"),
+    ("llm_model", "VARCHAR(150)", "VARCHAR(150)"),
+    ("filter_reasons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("pros", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("cons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+]
+
+
+async def _migrate_database_columns(conn) -> None:
+    """Safely adds missing columns and indexes to existing SQLite or PostgreSQL tables."""
 
     def _do_migrate(sync_conn):
+        is_sqlite = sync_conn.dialect.name == "sqlite"
         try:
-            res = sync_conn.execute(text("PRAGMA table_info(listings)")).fetchall()
-            existing_cols = {row[1] for row in res}
-            if existing_cols:  # table exists
-                if "is_exact_coords" not in existing_cols:
-                    logger.info("Migrating schema: adding 'is_exact_coords' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN is_exact_coords BOOLEAN DEFAULT 1"))
-                if "user_status" not in existing_cols:
-                    logger.info("Migrating schema: adding 'user_status' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN user_status VARCHAR(30) DEFAULT 'NEW'"))
-                if "user_notes" not in existing_cols:
-                    logger.info("Migrating schema: adding 'user_notes' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN user_notes TEXT"))
-                if "finish_condition" not in existing_cols:
-                    logger.info("Migrating schema: adding 'finish_condition' to listings table")
-                    sync_conn.execute(
-                        text("ALTER TABLE listings ADD COLUMN finish_condition VARCHAR(50) DEFAULT 'nieokreślony'")
-                    )
-                if "has_visualisations" not in existing_cols:
-                    logger.info("Migrating schema: adding 'has_visualisations' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN has_visualisations BOOLEAN DEFAULT 0"))
-                if "sewerage" not in existing_cols:
-                    logger.info("Migrating schema: adding 'sewerage' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN sewerage VARCHAR(50) DEFAULT 'nieznana'"))
-                if "heating" not in existing_cols:
-                    logger.info("Migrating schema: adding 'heating' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN heating VARCHAR(50) DEFAULT 'nieznane'"))
-                if "has_fiber" not in existing_cols:
-                    logger.info("Migrating schema: adding 'has_fiber' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN has_fiber BOOLEAN DEFAULT 0"))
-                if "category" not in existing_cols:
-                    logger.info("Migrating schema: adding 'category' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN category VARCHAR(50) DEFAULT 'dom'"))
-                if "rooms" not in existing_cols:
-                    logger.info("Migrating schema: adding 'rooms' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN rooms INTEGER"))
-                if "floor" not in existing_cols:
-                    logger.info("Migrating schema: adding 'floor' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN floor INTEGER"))
-                if "floors_in_building" not in existing_cols:
-                    logger.info("Migrating schema: adding 'floors_in_building' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN floors_in_building INTEGER"))
-                if "last_scraped_at" not in existing_cols:
-                    logger.info("Migrating schema: adding 'last_scraped_at' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN last_scraped_at DATETIME"))
-                if "is_private_owner" not in existing_cols:
-                    logger.info("Migrating schema: adding 'is_private_owner' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN is_private_owner BOOLEAN"))
-                if "profile_id" not in existing_cols:
-                    logger.info("Migrating schema: adding 'profile_id' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN profile_id VARCHAR(100)"))
-                    sync_conn.execute(
-                        text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)")
-                    )
-                    sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
-                if "profile_name" not in existing_cols:
-                    logger.info("Migrating schema: adding 'profile_name' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN profile_name VARCHAR(100)"))
-                if "gallery_images" not in existing_cols:
-                    logger.info("Migrating schema: adding 'gallery_images' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN gallery_images TEXT DEFAULT '[]'"))
-                if "parcel_id" not in existing_cols:
-                    logger.info("Migrating schema: adding 'parcel_id' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN parcel_id VARCHAR(100)"))
-                if "cadastral_area" not in existing_cols:
-                    logger.info("Migrating schema: adding 'cadastral_area' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN cadastral_area FLOAT"))
-                if "geoportal_url" not in existing_cols:
-                    logger.info("Migrating schema: adding 'geoportal_url' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN geoportal_url VARCHAR(500)"))
-                if "ai_summary" not in existing_cols:
-                    logger.info("Migrating schema: adding 'ai_summary' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN ai_summary TEXT"))
-                if "ai_questions" not in existing_cols:
-                    logger.info("Migrating schema: adding 'ai_questions' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN ai_questions TEXT DEFAULT '[]'"))
-                if "contact_phone" not in existing_cols:
-                    logger.info("Migrating schema: adding 'contact_phone' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN contact_phone VARCHAR(50)"))
-                if "contact_person" not in existing_cols:
-                    logger.info("Migrating schema: adding 'contact_person' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN contact_person VARCHAR(150)"))
-                if "ai_verdict" not in existing_cols:
-                    logger.info("Migrating schema: adding 'ai_verdict' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN ai_verdict TEXT"))
-                if "worth_interest" not in existing_cols:
-                    logger.info("Migrating schema: adding 'worth_interest' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN worth_interest BOOLEAN"))
-                if "mpzp_zone" not in existing_cols:
-                    logger.info("Migrating schema: adding 'mpzp_zone' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN mpzp_zone VARCHAR(250)"))
-                if "mpzp_status" not in existing_cols:
-                    logger.info("Migrating schema: adding 'mpzp_status' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN mpzp_status VARCHAR(50)"))
-                if "flood_risk_zone" not in existing_cols:
-                    logger.info("Migrating schema: adding 'flood_risk_zone' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN flood_risk_zone VARCHAR(100)"))
-                if "gesut_networks" not in existing_cols:
-                    logger.info("Migrating schema: adding 'gesut_networks' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN gesut_networks TEXT"))
-                tier1_cols = [
-                    ("landslide_risk", "VARCHAR(100)"),
-                    ("egib_building_status", "VARCHAR(100)"),
-                    ("egib_soil_class", "VARCHAR(100)"),
-                    ("noise_level_db", "FLOAT"),
-                    ("noise_zone", "VARCHAR(100)"),
-                    ("nature_protected_zone", "VARCHAR(250)"),
-                    ("monument_zone", "VARCHAR(250)"),
-                    ("cemetery_buffer_zone", "VARCHAR(100)"),
-                    ("broadband_status", "VARCHAR(100)"),
-                    ("broadband_details", "VARCHAR(250)"),
-                    ("parcel_front_width_m", "FLOAT"),
-                    ("parcel_length_m", "FLOAT"),
-                    ("parcel_aspect_ratio", "FLOAT"),
-                    ("parcel_shape_type", "VARCHAR(100)"),
-                    ("terrain_slope_pct", "FLOAT"),
-                    ("terrain_aspect", "VARCHAR(50)"),
-                    ("walkability_pka_dist_m", "INTEGER"),
-                    ("walkability_pka_name", "VARCHAR(150)"),
-                    ("power_lines_risk", "VARCHAR(150)"),
-                ]
-                for col_name, col_type in tier1_cols:
-                    if col_name not in existing_cols:
-                        logger.info(f"Migrating schema: adding '{col_name}' to listings table")
-                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_type}"))
-                llm_cache_cols = [
-                    ("desc_hash", "VARCHAR(64)"),
-                    ("llm_json", "TEXT"),
-                    ("llm_prompt_version", "VARCHAR(50)"),
-                    ("llm_model", "VARCHAR(150)"),
-                ]
-                for col_name, col_type in llm_cache_cols:
-                    if col_name not in existing_cols:
-                        logger.info(f"Migrating schema: adding '{col_name}' to listings table")
-                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_type}"))
-                sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_desc_hash ON listings (desc_hash)"))
+            if is_sqlite:
+                res = sync_conn.execute(text("PRAGMA table_info(listings)")).fetchall()
+                existing_cols = {str(row[1]).lower() for row in res}
+            else:
+                res = sync_conn.execute(
+                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'listings'")
+                ).fetchall()
+                existing_cols = {str(row[0]).lower() for row in res}
 
-                # spatial_cache table + expires index come from SpatialCacheModel via Base.metadata.create_all.
+            if not existing_cols:
+                return  # Table does not exist yet
+
+            for col_name, sqlite_def, pg_def in LISTINGS_SCHEMA_MIGRATIONS:
+                col_name_lower = col_name.lower()
+                if col_name_lower not in existing_cols:
+                    logger.info(f"Migrating schema: adding '{col_name}' to listings table")
+                    col_def = sqlite_def if is_sqlite else pg_def
+                    if is_sqlite:
+                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_def}"))
+                    else:
+                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
+                    existing_cols.add(col_name_lower)
+
+            if "profile_id" in existing_cols:
+                sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
+
+            if not is_sqlite:
+                tz_columns = [
+                    ("listings", "last_scraped_at"),
+                    ("listings", "notified_at"),
+                    ("listings", "created_at"),
+                    ("listings", "updated_at"),
+                    ("price_history", "recorded_at"),
+                    ("geocache", "cached_at"),
+                    ("spatial_cache", "created_at"),
+                    ("spatial_cache", "expires_at"),
+                ]
+                for tbl, col in tz_columns:
+                    try:
+                        sync_conn.execute(
+                            text(
+                                f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE TIMESTAMPTZ USING {col} AT TIME ZONE 'UTC'"
+                            )
+                        )
+                    except Exception as e:
+                        logger.debug(f"[Database] Column {tbl}.{col} timestamptz migration note: {e}")
+
+            # Invalidate stale air quality cache/columns caused by previous GIOŚ pagination bug (>60km)
+            try:
                 sync_conn.execute(
                     text(
-                        "CREATE INDEX IF NOT EXISTS ix_listings_perf ON listings (profile_id, is_qualified, qualification_score, created_at)"
+                        "UPDATE listings SET air_gios_station = NULL, air_gios_dist_km = NULL, air_gios_index = NULL WHERE air_gios_dist_km > 60"
                     )
                 )
+                sync_conn.execute(text("DELETE FROM spatial_cache WHERE cache_key = 'gios:stations_list_v1'"))
+                sync_conn.execute(text("DELETE FROM spatial_cache WHERE cache_key LIKE 'air_quality:%'"))
+            except Exception as e:
+                logger.debug(f"[Database] Air quality stale cleanup note: {e}")
+
+            sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)"))
+            sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_desc_hash ON listings (desc_hash)"))
+            sync_conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS ix_listings_perf ON listings (profile_id, is_qualified, qualification_score, created_at)"
+                )
+            )
         except Exception as e:
             logger.warning(f"Schema migration note: {e}")
 
@@ -463,7 +458,8 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
                 (SpatialCacheModel, "spatial_cache", ("created_at", "expires_at")),
             ):
                 if records := _load_records(model_cls, tbl, dt_fields):
-                    session.add_all(records)
+                    for rec in records:
+                        await session.merge(rec)
                     await session.flush()
                     logger.info(f"[Database] Zmigrowano {len(records)} wpisów z '{tbl}' do PostgreSQL.")
 
@@ -497,8 +493,7 @@ async def init_db() -> None:
                     await conn.execute(text("PRAGMA busy_timeout=60000;"))
                     await conn.execute(text("PRAGMA synchronous=NORMAL;"))
                 await conn.run_sync(Base.metadata.create_all)
-                if is_sqlite:
-                    await _migrate_sqlite_columns(conn)
+                await _migrate_database_columns(conn)
             if not is_sqlite:
                 await _auto_migrate_sqlite_to_postgres(engine)
             logger.info("Database tables initialized and up-to-date.")

@@ -4,7 +4,9 @@
 [![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white)](https://www.docker.com/)
 [![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
 
-Zaawansowana, asynchroniczna platforma monitorowania, analityki i wywiadu rynkowego dla nieruchomości. Ciągle śledzi, kwalifikuje, deduplikuje i analizuje oferty z głównych portali (**Otodom**, **OLX**, **Nieruchomości-online**, **Morizon**), integruje oficjalne dane ewidencyjne (**Geoportal Krajowy / GUGiK**), analizę due diligence opartą na LLM, interaktywny CRM z mapą oraz powiadomienia Discord/Telegram w czasie rzeczywistym.
+Zaawansowana, asynchroniczna platforma monitorowania, analityki i wywiadu rynkowego dla nieruchomości. Ciągle śledzi, kwalifikuje, deduplikuje i analizuje oferty z głównych portali (**Otodom**, **OLX**, **Nieruchomości-online**, **Morizon**), integruje oficjalne dane ewidencyjne (**Geoportal Krajowy / GUGiK**), jakość powietrza i smog (CAMS Copernicus + GIOŚ), analizę due diligence opartą na LLM, interaktywny CRM z mapą oraz powiadomienia Discord/Telegram w czasie rzeczywistym.
+
+**100% Uniwersalna i Agnostyczna dla dowolnego miasta w Polsce** — monitoruj domy, mieszkania i działki w **dowolnym polskim mieście, aglomeracji lub gminie** (Warszawa, Kraków, Wrocław, Poznań, Trójmiasto, Katowice/Śląsk, Łódź, Szczecin, Lublin, Rzeszów i każde inne). Dynamiczne generatory zapytań do portali, ogólnokrajowa integracja z bazami GUGiK (wszystkie 380+ powiatów) oraz system niezależnych profili czynią platformę w pełni uniwersalną.
 
 > 🇬🇧 *English documentation is available in [README.md](README.md).*
 
@@ -12,13 +14,20 @@ Zaawansowana, asynchroniczna platforma monitorowania, analityki i wywiadu rynkow
 
 ## ✨ Kluczowe funkcje
 
-### 🌐 1. Wydajny scraping wielu portali
+### 🌍 1. W pełni uniwersalna architektura wieloprofilowa i wielomiejska
+- **Agnostyczność lokalizacyjna:** System nie posiada żadnych zahardkodowanych miast ani blokad regionalnych — działa w dowolnej polskiej miejscowości.
+- **Dynamiczne generowanie linków portali:** Adresy zapytań dla Otodom, OLX, Nieruchomości-online i Morizon są syntetyzowane w locie na podstawie nazwy miasta, promienia poszukiwań (+km), kategorii (domy, mieszkania, działki), cen i liczby pokoi.
+- **Wieloprofilowość wyszukiwania:** Prowadź równoległy monitoring wielu różnych rynków jednocześnie (np. *Mieszkania Warszawa*, *Domy Kraków*, *Działki Wrocław*), każdy z odrębnymi filtrami, webhookami i portalami.
+- **Ogólnokrajowe pokrycie przestrzenne:** Integracja z ewidencją gruntów (ULDK TERYT), planami MPZP, strefami zalewowymi ISOK, osuwiskami SOPO oraz sieciami uzbrojenia terenu GESUT/KIUT obejmuje całą Polskę (380+ powiatów).
+- **Dynamiczna macierz dojazdów:** Czasy i odległości dojazdu wyliczane są dynamicznie względem centrum wybranej metropolii w oparciu o ogólnopolskie centroidy.
+
+### 🌐 2. Wydajny scraping wielu portali
 - **Omijanie anty-botów:** `curl_cffi` z impersonacją odcisku TLS przeglądarki Chrome (`impersonate="chrome120"`) przechodzi przez zabezpieczenia Cloudflare i DataDome bez płatnych proxy.
 - **Bezpośrednia ekstrakcja hydracji Next.js:** strukturalny JSON z tagów `__NEXT_DATA__` i `__PRERENDERED_STATE__` zamiast kruchych selektorów DOM.
 - **Inteligentny odświeżanie szczegółów:** warstwa cache pomija niedawno pobrane oferty, śledząc jednocześnie spadki cen i zmiany ogłoszeń.
 - **Niezależne limity per portal:** osobne limity stron i opóźnienia dla Otodom, OLX, Nieruchomości-online i Morizon.
 
-### 🗺️ 2. Oficjalne dane katastralne i geoprzestrzenne (Geoportal GUGiK)
+### 🗺️ 3. Oficjalne dane katastralne i geoprzestrzenne (Geoportal GUGiK)
 - **Automatyczna identyfikacja działki:** zapytania do krajowego API ULDK (`GetParcelByXY`) ustalają numer działki ewidencyjnej (`TERYT`), gminę, obręb i numer z współrzędnych GPS.
 - **Dokładna powierzchnia:** pobieranie granic działki w `EPSG:2180` i obliczanie rzeczywistej powierzchni prawnej w m² (z obsługą enklaw i multipoligonów).
 - **Audyt ryzyka przemysłowego/handlowego:** skan otoczenia w promieniu 120 metrów w 8 kierunkach przez KIEG WMS (`GetFeatureInfo`):
@@ -27,7 +36,7 @@ Zaawansowana, asynchroniczna platforma monitorowania, analityki i wywiadu rynkow
   - `Tk` – tereny kolejowe
 - **Automatyczna kara punktowa i alerty:** −25 punktów za sąsiedztwo ryzyk przemysłowych, wpis w „minusach" i linki 1-klik do Geoportalu Krajowego.
 
-### 🧠 3. Dwuetapowy silnik kwalifikacji i analizy semantycznej
+### 🧠 4. Dwuetapowy silnik kwalifikacji i analizy semantycznej
 - **Etap I (twarde reguły):** ścisłe progi numeryczne (cena, cena/m², metraż domu, działka, liczba pokoi, piętro, rok budowy, typ właściciela/rynku) oraz whitelist/blacklist lokalizacji.
 - **Etap II (NLP semantyczne i heurystyki):** analiza tytułów i pełnych opisów:
   - Wykrywanie **stanu wykończenia**: *do zamieszkania / pod klucz*, *do wykończenia*, *deweloperski*, *surowy zamknięty*, *surowy otwarty*, *do remontu*.
@@ -37,7 +46,7 @@ Zaawansowana, asynchroniczna platforma monitorowania, analityki i wywiadu rynkow
 - **Deduplikacja między agencjami (`property_fingerprint`):** dopasowywanie tej samej nieruchomości wystawionej przez kilka agencji na podstawie rozmytych sygnatur przestrzennych, cenowych i wymiarowych.
 - **Historia cen:** śledzenie spadków cen z procentami i znacznikami czasu.
 
-### 🤖 4. AI Due Diligence (opcjonalna analiza LLM)
+### 🤖 5. AI Due Diligence (opcjonalna analiza LLM)
 Wspierane backendy: **OpenRouter**, **OpenAI** lub lokalny **Ollama**. Dla każdej oferty LLM zwraca strukturalny JSON:
 - **Podsumowanie TL;DR** — maks. 2 konkretne zdania: lokalizacja, metraż, cena (i zł/m²), faktyczny stan wykończenia oraz główne ryzyko/atut. Bez marketingowej wody.
 - **Werdykt** (`worth_interest` + `verdict`) — ✅ warto się zainteresować / ❌ pominąć, uzasadniony konkretnymi liczbami z ogłoszenia.
@@ -47,17 +56,17 @@ Wspierane backendy: **OpenRouter**, **OpenAI** lub lokalny **Ollama**. Dla każd
 - **Ekstrakcja kontaktu** — numer telefonu i osoba kontaktowa.
 - **Ukryte koszty, ryzyka prawne, rozbieżności portal vs. opis, zalety i wady.**
 
-### 📊 5. Interaktywny Live Dashboard i CRM
+### 📊 6. Interaktywny Live Dashboard i CRM
 - **Nowoczesny ciemny UI:** profesjonalny design na neutralnej palecie kolorów i cyfrach tabelarycznych.
 - **Interaktywna mapa Leaflet:** kolorowe pinezki, klasteryzacja i synchronizacja widoku.
 - **Osobisty CRM:** oznaczanie ofert jako ⭐ Ulubione, 📅 Do obejrzenia, ✕ Odrzucone oraz prywatne notatki z oględzin.
-- **Zarządzanie wieloma profilami:** przełączanie profili (np. *Domy Rzeszów*, *Mieszkania Kraków*, *Działki Warszawa*) prosto z przeglądarki.
+- **Zarządzanie wieloma profilami:** przełączanie profili (np. *Mieszkania Warszawa*, *Domy Kraków*, *Działki Wrocław*) prosto z przeglądarki.
 - **Modal AI Due Diligence:** TL;DR, badge werdyktu, pytania do agenta, karta kontaktu z gotowym SMS-em do skopiowania, kalkulator kosztów zakupu all-in i historia spadków cen.
 - **Konfiguracja na żywo:** edycja profili, progów, whitelist/blacklist i harmonogramu bez restartu — z jednoklikowym startem scrapingu.
 - **Reset bazy danych:** bezpieczne czyszczenie ofert (per profil lub całej bazy) z potwierdzeniem.
 - **Galerie zdjęć i Lightbox:** karuzele miniatur i pełnoekranowy podgląd.
 
-### ⏱️ 6. Inteligentny harmonogram i godziny nocne
+### ⏱️ 7. Inteligentny harmonogram i godziny nocne
 - Konfigurowalne ciągłe monitorowanie w tle (np. co 15–20 minut w ciągu dnia).
 - Automatyczny **tryb nocny** (np. co 60 minut między 22:00 a 07:00).
 - Dynamiczna zmiana interwałów z poziomu panelu web bez restartu kontenera.
@@ -171,8 +180,8 @@ Aplikacja udostępnia ujednolicone CLI w [`main.py`](main.py):
 
 | Komenda | Opis | Przykład |
 | :--- | :--- | :--- |
-| `run` | Start ciągłego demona monitorującego | `python main.py run` lub `python main.py run --profile "Domy Rzeszów" --interval 15` |
-| `once` | Pojedynczy przebieg scrapingu i kwalifikacji | `python main.py once` lub `python main.py once --profile "Domy Rzeszów"` |
+| `run` | Start ciągłego demona monitorującego | `python main.py run` lub `python main.py run --profile "Mieszkania Warszawa" --interval 15` |
+| `once` | Pojedynczy przebieg scrapingu i kwalifikacji | `python main.py once` lub `python main.py once --profile "Domy Kraków"` |
 | `dashboard` | Uruchomienie Live Dashboard z CRM i mapą Leaflet | `python main.py dashboard --port 8080` (alias: `server`) |
 | `geoportal` | Audyt zapisanych ofert w Geoportalu GUGiK | `python main.py geoportal --limit 50` (`--all` — z niezakwalifikowanymi) |
 | `report` | Generowanie statycznego raportu HTML | `python main.py report` (otwiera w przeglądarce) |
@@ -236,21 +245,39 @@ Wiele niezależnych profili (Domy, Mieszkania, Działki) w dowolnym polskim mie�
 {
   "profiles": [
     {
-      "id": "rzeszow_domy",
-      "name": "Domy Rzeszów",
+      "id": "warszawa_mieszkania",
+      "name": "Mieszkania Warszawa",
       "enabled": true,
-      "category": "dom",
-      "city": "Rzeszów",
-      "distance_radius": 15,
-      "min_price": 400000,
-      "max_price": 1300000,
-      "min_area_home": 100,
-      "max_area_home": 150,
-      "min_area_plot": 250,
-      "min_year_built": 2015,
+      "category": "mieszkanie",
+      "city": "Warszawa",
+      "distance_radius": 5,
+      "min_price": 500000,
+      "max_price": 1200000,
+      "min_area_home": 45,
+      "max_area_home": 85,
+      "min_rooms": 2,
+      "max_rooms": 4,
       "allowed_finish_conditions": ["do zamieszkania"],
       "allow_visualisations": false,
-      "building_types": ["wolnostojący", "bliźniak", "szeregowiec", "inny"],
+      "whitelist_areas": ["Mokotów", "Ursynów", "Wola"],
+      "blacklist_keywords": [],
+      "enabled_portals": null
+    },
+    {
+      "id": "krakow_domy",
+      "name": "Domy Kraków",
+      "enabled": true,
+      "category": "dom",
+      "city": "Kraków",
+      "distance_radius": 15,
+      "min_price": 700000,
+      "max_price": 1600000,
+      "min_area_home": 100,
+      "max_area_home": 180,
+      "min_area_plot": 400,
+      "allowed_finish_conditions": ["all"],
+      "allow_visualisations": true,
+      "building_types": ["wolnostojący", "bliźniak", "szeregowiec"],
       "whitelist_areas": [],
       "blacklist_keywords": [],
       "enabled_portals": null

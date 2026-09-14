@@ -61,7 +61,7 @@ class ListingModel(Base):
 
     raw_description: Mapped[str] = mapped_column(Text, default="")
     main_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
-    last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Location precision & Geoportal data
     is_exact_coords: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -92,6 +92,17 @@ class ListingModel(Base):
     walkability_pka_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     power_lines_risk: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
+    # Air quality & smog intelligence (CAMS + GIOŚ)
+    air_aqi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    air_aqi_label: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    air_pm25_heating_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    air_pm25_summer_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    air_smog_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    air_gios_station: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    air_gios_dist_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    air_gios_index: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    air_smog_risk: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     # CRM User Actions & Status
     user_status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -120,10 +131,10 @@ class ListingModel(Base):
     llm_prompt_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     llm_model: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
-    notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
+        DateTime(timezone=True),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
@@ -226,7 +237,7 @@ class PriceHistoryModel(Base):
     listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), nullable=False, index=True)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     price_per_m2: Mapped[float] = mapped_column(Float, nullable=False)
-    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
     listing: Mapped["ListingModel"] = relationship("ListingModel", back_populates="price_history")
 
@@ -238,7 +249,7 @@ class GeocacheModel(Base):
     latitude: Mapped[float] = mapped_column(Float, nullable=False)
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    cached_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    cached_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 
 
 class SpatialCacheModel(Base):
@@ -246,5 +257,5 @@ class SpatialCacheModel(Base):
 
     cache_key: Mapped[str] = mapped_column(String(300), primary_key=True)
     data_json: Mapped[str] = mapped_column(Text, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)

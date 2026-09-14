@@ -76,7 +76,7 @@ def extract_street_token(
                 if words:
                     return words[-1]
 
-    return "rzeszow_area"
+    return "unknown_area"
 
 
 def compute_desc_hash(raw_description: str | None) -> str | None:

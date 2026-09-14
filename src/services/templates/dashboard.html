@@ -360,6 +360,14 @@
         <main id="appWorkspace">
             <div id="mapWrapper">
                 <div id="map"></div>
+                <div class="map-overlay-controls">
+                    <button type="button" class="map-ctrl-btn" id="btnToggleAqiLayer" onclick="toggleAqiMapLayer()" title="Włącz/wyłącz warstwę wskaźnika jakości powietrza (Europejski AQI)">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+                        </svg>
+                        <span>Warstwa AQI</span>
+                    </button>
+                </div>
             </div>
             <div class="listings-column">
                 <div class="results-count">
@@ -367,7 +375,7 @@
                 </div>
                 <div class="listings-container" id="listingsContainer">
                     <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-                        Ładowanie ofert z bazy danych SQLite…
+                        Ładowanie ofert z bazy danych…
                     </div>
                 </div>
             </div>
@@ -1143,6 +1151,18 @@
                         </button>
                     </h3>
                     <div id="aiNegotiationContent"></div>
+                </section>
+
+                <!-- Jakość powietrza i profil smogowy (CAMS + GIOŚ) -->
+                <section class="drawer-section" id="aiAirQualitySection" style="display:none;">
+                    <h3 class="drawer-section-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"></path>
+                        </svg>
+                        Jakość powietrza i profil smogowy
+                        <span id="aiAirQualityBadge" class="meta-tag tag-profile" style="margin-left:auto;font-size:10px;"></span>
+                    </h3>
+                    <div id="aiAirQualityContent"></div>
                 </section>
 
                 <!-- Historia korekt cen -->

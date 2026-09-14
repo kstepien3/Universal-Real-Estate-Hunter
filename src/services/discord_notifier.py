@@ -308,11 +308,11 @@ class DiscordNotifier:
             return False
 
         payload = {
-            "username": "Rzeszów House Hunter (Test)",
+            "username": "Universal Real Estate Hunter (Test)",
             "embeds": [
                 {
                     "title": "🔔 Test połączenia z systemem monitorowania ofert",
-                    "description": "Webhook Discorda działa prawidłowo! System jest gotowy do monitorowania ofert domów w Rzeszowie i okolicach.",
+                    "description": "Webhook Discorda działa prawidłowo! System jest gotowy do monitorowania rynku nieruchomości.",
                     "color": self.COLOR_WHITELIST,
                     "fields": [
                         {"name": "Status", "value": "🟢 Aktywny", "inline": True},

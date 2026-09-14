@@ -451,3 +451,86 @@ async def test_auto_migrate_sqlite_to_postgres(tmp_path, monkeypatch):
         assert row[2] == 750000.0
 
     await target_engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_migrate_database_columns_sqlite(tmp_path):
+    """Test that _migrate_database_columns adds missing columns to existing SQLite tables."""
+    import sqlite3
+
+    from src.storage.database import _migrate_database_columns
+
+    db_file = tmp_path / "legacy_migration_test.db"
+    conn = sqlite3.connect(str(db_file))
+    # Create minimal legacy table without air_aqi, desc_hash, etc.
+    conn.execute("""
+        CREATE TABLE listings (
+            id INTEGER PRIMARY KEY,
+            portal TEXT,
+            portal_id TEXT,
+            url TEXT,
+            property_fingerprint TEXT,
+            title TEXT,
+            price REAL,
+            price_per_m2 REAL,
+            area_home REAL
+        )
+    """)
+    conn.commit()
+    conn.close()
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}", echo=False)
+    async with engine.begin() as aconn:
+        await _migrate_database_columns(aconn)
+
+    # Verify that new columns were added
+    async with engine.connect() as aconn:
+        cols = await aconn.run_sync(
+            lambda sc: {r[1] for r in sc.execute(text("PRAGMA table_info(listings)")).fetchall()}
+        )
+        assert "air_aqi" in cols
+        assert "air_aqi_label" in cols
+        assert "air_pm25_heating_avg" in cols
+        assert "air_smog_risk" in cols
+        assert "desc_hash" in cols
+        assert "profile_id" in cols
+        assert "user_status" in cols
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_migrate_database_columns_postgres_simulation():
+    """Test that _migrate_database_columns generates ALTER TABLE IF NOT EXISTS on postgres dialect."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    from src.storage.database import _migrate_database_columns
+
+    executed_sqls = []
+
+    mock_conn = MagicMock()
+    mock_conn.dialect.name = "postgresql"
+
+    def mock_execute(sql, *args, **kwargs):
+        sql_str = str(sql)
+        executed_sqls.append(sql_str)
+        mock_res = MagicMock()
+        if "information_schema.columns" in sql_str:
+            # Simulate an existing table with only legacy columns (missing air_aqi)
+            mock_res.fetchall.return_value = [("id",), ("title",), ("price",)]
+        else:
+            mock_res.fetchall.return_value = []
+        return mock_res
+
+    mock_conn.execute = mock_execute
+
+    async_conn_mock = MagicMock()
+    async_conn_mock.run_sync = AsyncMock(side_effect=lambda fn: fn(mock_conn))
+
+    await _migrate_database_columns(async_conn_mock)
+
+    # Verify ALTER TABLE ADD COLUMN IF NOT EXISTS air_aqi INTEGER was executed
+    air_aqi_statements = [
+        s for s in executed_sqls if "ALTER TABLE listings ADD COLUMN IF NOT EXISTS air_aqi INTEGER" in s
+    ]
+    assert len(air_aqi_statements) == 1

@@ -46,6 +46,7 @@ Finish note:
     - If flood risk (ZAGROŻENIE_POWODZIOWE) is present, add it to legal_risks and include a question for the agent about flood history, defenses, and insurance.
     - If MPZP indicates lack of plan or conflicts with residential claims, add to legal_risks or discrepancies.
     - If Parcel ID is unknown (approximate location), include a question asking for the exact cadastral parcel number (nr działki) and obręb to verify MPZP and flood maps.
+    - If air quality data indicates elevated winter smog (PM2.5 heating avg > 25 µg/m³ or smog days >= 20), add a con regarding winter smog risk and formulate an agent question concerning heating methods in the building and immediate neighborhood (e.g. solid fuel boilers in the vicinity).
 
 Language: All free-text string values (summary, finish_note, visualisation_note, verdict, questions_for_agent, contact_person, hidden_costs, legal_risks, discrepancies, pros, cons) MUST be in Polish. Enum values stay exactly as specified.
 

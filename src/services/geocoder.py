@@ -12,61 +12,102 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.storage.database import get_session, safe_commit
 from src.storage.models import GeocacheModel, ListingModel
 
-# Well-known centroids for Rzeszów districts and surrounding towns
-RZESZOW_DISTRICT_CENTROIDS = {
-    "słocina": (50.0242, 22.0520),
-    "slocina": (50.0242, 22.0520),
-    "zalesie": (50.0150, 22.0250),
-    "staromieście": (50.0610, 22.0120),
-    "staromiescie": (50.0610, 22.0120),
-    "drabinianka": (50.0130, 22.0010),
-    "budziwój": (49.9720, 21.9890),
-    "budziwoj": (49.9720, 21.9890),
-    "biała": (49.9880, 22.0180),
-    "biala": (49.9880, 22.0180),
-    "przybyszówka": (50.0350, 21.9450),
-    "przybyszowka": (50.0350, 21.9450),
-    "baranówka": (50.0520, 21.9780),
-    "baranowka": (50.0520, 21.9780),
-    "wilkowyja": (50.0380, 22.0400),
-    "załęże": (50.0560, 22.0390),
-    "zaleze": (50.0560, 22.0390),
-    "pobitno": (50.0410, 22.0290),
-    "nowe miasto": (50.0280, 22.0080),
-    "krasne": (50.0430, 22.0830),
-    "trzebownisko": (50.0780, 22.0520),
-    "nowa wieś": (50.0980, 22.0550),
-    "nowa wies": (50.0980, 22.0550),
-    "jasionka": (50.1110, 22.0620),
-    "tajęcina": (50.1250, 22.0350),
-    "tajecina": (50.1250, 22.0350),
-    "zaczernie": (50.0920, 22.0150),
-    "głogów małopolski": (50.1510, 21.9610),
-    "glogow malopolski": (50.1510, 21.9610),
-    "głogów młp": (50.1510, 21.9610),
-    "glogow mlp": (50.1510, 21.9610),
-    "boguchwała": (49.9840, 21.9390),
-    "boguchwala": (49.9840, 21.9390),
-    "tyczyn": (49.9650, 22.0350),
-    "świlcza": (50.0680, 21.8980),
-    "swilcza": (50.0680, 21.8980),
-    "bratkowice": (50.0950, 21.8100),
-    "rudna mała": (50.0950, 21.9750),
-    "rudna mala": (50.0950, 21.9750),
-    "rudna wielka": (50.0820, 21.9350),
-    "malawa": (50.0210, 22.0910),
-    "chmielnik": (49.9780, 22.1400),
-    "łańcut": (50.0690, 22.2310),
-    "lancut": (50.0690, 22.2310),
-    "rzeszów": (50.0375, 22.0047),
-    "rzeszow": (50.0375, 22.0047),
+# Centroids for recognized districts by city slug
+DISTRICT_CENTROIDS_BY_CITY: dict[str, dict[str, tuple[float, float]]] = {
+    "rzeszow": {
+        "słocina": (50.0242, 22.0520),
+        "slocina": (50.0242, 22.0520),
+        "zalesie": (50.0150, 22.0250),
+        "staromieście": (50.0610, 22.0120),
+        "staromiescie": (50.0610, 22.0120),
+        "drabinianka": (50.0130, 22.0010),
+        "budziwój": (49.9720, 21.9890),
+        "budziwoj": (49.9720, 21.9890),
+        "biała": (49.9880, 22.0180),
+        "biala": (49.9880, 22.0180),
+        "przybyszówka": (50.0350, 21.9450),
+        "przybyszowka": (50.0350, 21.9450),
+        "baranówka": (50.0520, 21.9780),
+        "baranowka": (50.0520, 21.9780),
+        "wilkowyja": (50.0380, 22.0400),
+        "załęże": (50.0560, 22.0390),
+        "zaleze": (50.0560, 22.0390),
+        "pobitno": (50.0410, 22.0290),
+        "nowe miasto": (50.0280, 22.0080),
+        "krasne": (50.0430, 22.0830),
+        "trzebownisko": (50.0780, 22.0520),
+        "nowa wieś": (50.0980, 22.0550),
+        "nowa wies": (50.0980, 22.0550),
+        "jasionka": (50.1110, 22.0620),
+        "tajęcina": (50.1250, 22.0350),
+        "tajecina": (50.1250, 22.0350),
+        "zaczernie": (50.0920, 22.0150),
+        "głogów małopolski": (50.1510, 21.9610),
+        "glogow malopolski": (50.1510, 21.9610),
+        "głogów młp": (50.1510, 21.9610),
+        "glogow mlp": (50.1510, 21.9610),
+        "boguchwała": (49.9840, 21.9390),
+        "boguchwala": (49.9840, 21.9390),
+        "tyczyn": (49.9650, 22.0350),
+        "świlcza": (50.0680, 21.8980),
+        "swilcza": (50.0680, 21.8980),
+        "bratkowice": (50.0950, 21.8100),
+        "rudna mała": (50.0950, 21.9750),
+        "rudna mala": (50.0950, 21.9750),
+        "rudna wielka": (50.0820, 21.9350),
+        "malawa": (50.0210, 22.0910),
+        "chmielnik": (49.9780, 22.1400),
+        "łańcut": (50.0690, 22.2310),
+        "lancut": (50.0690, 22.2310),
+    },
+    "krakow": {
+        "krowodrza": (50.0766, 19.9238),
+        "nowa huta": (50.0722, 20.0373),
+        "podgorze": (50.0347, 19.9540),
+        "podgórze": (50.0347, 19.9540),
+        "debniki": (50.0392, 19.9142),
+        "dębniki": (50.0392, 19.9142),
+        "stare miasto": (50.0617, 19.9373),
+        "pradnik czerwony": (50.0894, 19.9647),
+        "prądnik czerwony": (50.0894, 19.9647),
+        "pradnik bialy": (50.0967, 19.9272),
+        "prądnik biały": (50.0967, 19.9272),
+        "bronowice": (50.0811, 19.8911),
+    },
+    "warszawa": {
+        "mokotow": (52.1983, 21.0315),
+        "mokotów": (52.1983, 21.0315),
+        "ursynow": (52.1417, 21.0422),
+        "ursynów": (52.1417, 21.0422),
+        "wola": (52.2367, 20.9633),
+        "bielany": (52.2858, 20.9389),
+        "praga polnoc": (52.2614, 21.0369),
+        "praga północ": (52.2614, 21.0369),
+        "praga poludnie": (52.2344, 21.0825),
+        "praga południe": (52.2344, 21.0825),
+        "srodmiescie": (52.2317, 21.0183),
+        "śródmieście": (52.2317, 21.0183),
+        "wilanow": (52.1656, 21.0911),
+        "wilanów": (52.1656, 21.0911),
+        "ochota": (52.2133, 20.9786),
+    },
+    "wroclaw": {
+        "krzyki": (51.0772, 17.0167),
+        "fabryczna": (51.1167, 16.9500),
+        "psie pole": (51.1500, 17.1167),
+        "srodmiescie": (51.1200, 17.0500),
+        "śródmieście": (51.1200, 17.0500),
+        "stare miasto": (51.1100, 17.0300),
+    },
 }
 
 
 class NominatimGeocoder:
     def __init__(self) -> None:
         self.base_url = "https://nominatim.openstreetmap.org/search"
-        self.headers = {"User-Agent": "RzeszowPropertyHunter/1.0 (automated house monitor; rzeszow-hunter@local)"}
+        self.headers = {
+            "User-Agent": "UniversalRealEstateHunter/1.0 (automated real estate monitor; estate-hunter@local)"
+        }
         self._lock = asyncio.Lock()
         self._last_request_time = 0.0
         # In-memory cache for the current process/cycle (avoids repeat DB + HTTP hits).
@@ -155,6 +196,19 @@ class NominatimGeocoder:
         except Exception as e:
             logger.debug(f"[Geocoder] Failed to persist cache for '{query_key}': {e}")
 
+    def _guess_city_from_raw(self, location_raw: str | None) -> str:
+        """Best-effort city extraction from a raw location string. Prefers a token
+        matching a known Polish city; otherwise returns empty (never a street)."""
+        if not location_raw:
+            return ""
+        from src.services.config_manager import CITY_CENTROIDS, slugify_city
+
+        tokens = [t.strip() for t in location_raw.split(",") if t.strip()]
+        for token in tokens:
+            if slugify_city(token) in CITY_CENTROIDS:
+                return token
+        return ""
+
     def _find_district_fallback(
         self,
         street: str | None,
@@ -163,14 +217,32 @@ class NominatimGeocoder:
         location_raw: str | None,
     ) -> tuple[float, float] | None:
         haystack = f"{street or ''} {district or ''} {city or ''} {location_raw or ''}".lower()
-        from src.services.config_manager import CITY_CENTROIDS
+        from src.services.config_manager import CITY_CENTROIDS, POLISH_CHAR_MAP, slugify_city
 
-        for c_name, coords in CITY_CENTROIDS.items():
-            if re.search(rf"\b{re.escape(c_name)}\b", haystack):
-                return coords
-        for key, coords in RZESZOW_DISTRICT_CENTROIDS.items():
-            if re.search(rf"\b{re.escape(key)}\b", haystack):
-                return coords
+        clean_haystack = "".join(POLISH_CHAR_MAP.get(ch, ch) for ch in haystack)
+
+        # 1. Resolve active city slug
+        resolved_city_slug = ""
+        if city:
+            resolved_city_slug = slugify_city(city)
+        else:
+            for c_name in CITY_CENTROIDS:
+                if re.search(rf"\b{re.escape(c_name)}\b", clean_haystack) or re.search(
+                    rf"\b{re.escape(c_name)}\b", haystack
+                ):
+                    resolved_city_slug = c_name
+                    break
+
+        # 2. Check local micro-districts for the resolved city if configured
+        if resolved_city_slug in DISTRICT_CENTROIDS_BY_CITY:
+            for key, coords in DISTRICT_CENTROIDS_BY_CITY[resolved_city_slug].items():
+                if re.search(rf"\b{re.escape(key)}\b", haystack) or re.search(rf"\b{re.escape(key)}\b", clean_haystack):
+                    return coords
+
+        # 3. Match general city centroids across Poland (e.g. Poznań, Kraków, Warszawa, Wrocław, Rzeszów)
+        if resolved_city_slug and resolved_city_slug in CITY_CENTROIDS:
+            return CITY_CENTROIDS[resolved_city_slug]
+
         return None
 
     async def geocode(
@@ -188,14 +260,14 @@ class NominatimGeocoder:
         """
         city_name = (city or "").strip()
         if not city_name and location_raw:
-            tokens = [t.strip() for t in location_raw.split(",") if t.strip()]
-            if tokens:
-                city_name = tokens[0]
+            city_name = self._guess_city_from_raw(location_raw)
 
-        # 1. Try Street + City on Nominatim
-        if street:
+        # 1. Try Street + City on Nominatim (only when a city context is known —
+        # a bare street name without a city would resolve to an arbitrary match
+        # anywhere in Poland).
+        if street and city_name:
             clean_street = street.replace("ul.", "").replace("ulica", "").strip()
-            query = f"{clean_street}, {city_name}, Polska" if city_name else f"{clean_street}, Polska"
+            query = f"{clean_street}, {city_name}, Polska"
             query_key = f"street:{query}".lower()
 
             cached = await self.get_cached(session, query_key)

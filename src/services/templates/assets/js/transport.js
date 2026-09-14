@@ -108,6 +108,10 @@
                     return await ensureOk('/api/listings/' + listingId + '/price-history');
                 },
 
+                async airQuality(listingId) {
+                    return await ensureOk('/api/listings/' + listingId + '/air-quality');
+                },
+
                 async getLlmStatus() {
                     return await ensureOk('/api/llm/status');
                 },

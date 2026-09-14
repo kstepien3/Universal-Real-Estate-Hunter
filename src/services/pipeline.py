@@ -217,48 +217,76 @@ class ScraperPipeline:
                 or getattr(listing, "broadband_status", None) is None
                 or getattr(listing, "parcel_front_width_m", None) is None
                 or getattr(listing, "terrain_slope_pct", None) is None
+                or getattr(listing, "air_pm25_heating_avg", None) is None
             )
             if listing.coordinates and is_exact_coords and needs_spatial_audit:
                 try:
+                    from src.services.air_quality import air_quality_service
                     from src.services.geoportal import geoportal_service
 
-                    geo_audit = await geoportal_service.audit_location(
+                    geo_coro = geoportal_service.audit_location(
                         listing.coordinates[0],
                         listing.coordinates[1],
                         radius_meters=120,
                         category=getattr(listing, "category", "dom"),
                     )
-                    if geo_audit.get("main_parcel_id"):
-                        listing.parcel_id = geo_audit["main_parcel_id"]
-                        listing.cadastral_area = geo_audit.get("cadastral_area")
-                        listing.geoportal_url = geo_audit.get("geoportal_url")
-                        listing.mpzp_zone = geo_audit.get("mpzp_zone")
-                        listing.mpzp_status = geo_audit.get("mpzp_status")
-                        listing.flood_risk_zone = geo_audit.get("flood_risk_zone")
-                    for k in (
-                        "landslide_risk",
-                        "egib_building_status",
-                        "egib_soil_class",
-                        "noise_level_db",
-                        "noise_zone",
-                        "nature_protected_zone",
-                        "monument_zone",
-                        "cemetery_buffer_zone",
-                        "broadband_status",
-                        "broadband_details",
-                        "parcel_front_width_m",
-                        "parcel_length_m",
-                        "parcel_aspect_ratio",
-                        "parcel_shape_type",
-                        "terrain_slope_pct",
-                        "terrain_aspect",
-                        "walkability_pka_dist_m",
-                        "walkability_pka_name",
-                        "power_lines_risk",
-                        "gesut_networks",
-                    ):
-                        if (v := geo_audit.get(k)) is not None:
-                            setattr(listing, k, v)
+                    aq_coro = air_quality_service.get_air_quality_audit(
+                        listing.coordinates[0],
+                        listing.coordinates[1],
+                    )
+                    geo_res: Any
+                    aq_res: Any
+                    geo_res, aq_res = await asyncio.gather(geo_coro, aq_coro, return_exceptions=True)
+                    if isinstance(geo_res, dict):
+                        geo_audit = geo_res
+                        if geo_audit.get("main_parcel_id"):
+                            listing.parcel_id = geo_audit["main_parcel_id"]
+                            listing.cadastral_area = geo_audit.get("cadastral_area")
+                            listing.geoportal_url = geo_audit.get("geoportal_url")
+                            listing.mpzp_zone = geo_audit.get("mpzp_zone")
+                            listing.mpzp_status = geo_audit.get("mpzp_status")
+                            listing.flood_risk_zone = geo_audit.get("flood_risk_zone")
+                        for k in (
+                            "landslide_risk",
+                            "egib_building_status",
+                            "egib_soil_class",
+                            "noise_level_db",
+                            "noise_zone",
+                            "nature_protected_zone",
+                            "monument_zone",
+                            "cemetery_buffer_zone",
+                            "broadband_status",
+                            "broadband_details",
+                            "parcel_front_width_m",
+                            "parcel_length_m",
+                            "parcel_aspect_ratio",
+                            "parcel_shape_type",
+                            "terrain_slope_pct",
+                            "terrain_aspect",
+                            "walkability_pka_dist_m",
+                            "walkability_pka_name",
+                            "power_lines_risk",
+                            "gesut_networks",
+                        ):
+                            if (v := geo_audit.get(k)) is not None:
+                                setattr(listing, k, v)
+                    else:
+                        geo_audit = None
+
+                    if isinstance(aq_res, dict):
+                        for ak in (
+                            "air_aqi",
+                            "air_aqi_label",
+                            "air_pm25_heating_avg",
+                            "air_pm25_summer_avg",
+                            "air_smog_days",
+                            "air_gios_station",
+                            "air_gios_dist_km",
+                            "air_gios_index",
+                            "air_smog_risk",
+                        ):
+                            if (av := aq_res.get(ak)) is not None:
+                                setattr(listing, ak, av)
 
                     # Log summary of spatial audit
                     parts = []
@@ -271,6 +299,10 @@ class ScraperPipeline:
                         parts.append(f"stok: {listing.terrain_slope_pct:.1f}%")
                     if listing.walkability_pka_name:
                         parts.append(f"PKA: {listing.walkability_pka_name}")
+                    if listing.air_aqi is not None:
+                        parts.append(f"AQI: {listing.air_aqi}")
+                    if listing.air_pm25_heating_avg is not None:
+                        parts.append(f"PM2.5 zima: {listing.air_pm25_heating_avg:.0f} µg/m³")
                     if parts:
                         global_tracker.add_log(
                             f"🏛️ [Rejestry] {listing.title[:25]}: " + " | ".join(parts),
@@ -278,7 +310,7 @@ class ScraperPipeline:
                             category="geo",
                         )
                 except Exception as e:
-                    logger.debug(f"[Pipeline] Geoportal audit skipped: {e}")
+                    logger.debug(f"[Pipeline] Geoportal/AirQuality audit skipped: {e}")
 
         # Check if LLM can be skipped because this listing was already analyzed.
         # Uses stable desc_hash (normalized text) + prompt version instead of raw
@@ -404,6 +436,15 @@ class ScraperPipeline:
                 "walkability_pka_dist_m",
                 "walkability_pka_name",
                 "power_lines_risk",
+                "air_aqi",
+                "air_aqi_label",
+                "air_pm25_heating_avg",
+                "air_pm25_summer_avg",
+                "air_smog_days",
+                "air_gios_station",
+                "air_gios_dist_km",
+                "air_gios_index",
+                "air_smog_risk",
             ):
                 if (val := getattr(listing, sf, None)) is not None:
                     setattr(filter_result, sf, val)
@@ -604,6 +645,12 @@ class ScraperPipeline:
                 "notified": 0,
                 "skipped_reason": "already_running",
             }
+
+        # Signal the tracker that a cycle is starting right now — before any
+        # heavy startup work (init_db, fresh URLs, medians). Otherwise the
+        # dashboard would briefly report the previous cycle's stale
+        # "completed 100%" state and stop polling.
+        global_tracker.mark_starting()
 
         try:
             return await self._do_run_cycle(target_profile=target_profile)
@@ -884,6 +931,7 @@ class ScraperPipeline:
         (SIDUSIS FTTH, ULDK OBB parcel geometry, GUGiK NMT slope/aspect, PKA walkability, power lines).
         Also geocodes any listings missing coordinates.
         """
+        from src.services.air_quality import air_quality_service
         from src.services.geocoder import geocoder
         from src.services.geoportal import geoportal_service
 
@@ -918,7 +966,7 @@ class ScraperPipeline:
                 item.longitude = lon
                 item.is_exact_coords = is_exact
 
-        # 2. Find listings with exact coordinates that lack spatial metrics
+        # 2. Find listings with exact coordinates that lack spatial metrics or air quality
         stmt = (
             select(ListingModel)
             .where(
@@ -930,6 +978,7 @@ class ScraperPipeline:
                     | ListingModel.parcel_front_width_m.is_(None)
                     | ListingModel.terrain_slope_pct.is_(None)
                     | ListingModel.parcel_id.is_(None)
+                    | ListingModel.air_smog_risk.is_(None)
                 ),
             )
             .limit(limit)
@@ -940,7 +989,9 @@ class ScraperPipeline:
             return 0
 
         total_spatial = len(items)
-        global_tracker.add_log(f"🗺️ Uzupełnianie rejestrów Geoportal/SIDUSIS dla {total_spatial} ofert...", level="geo")
+        global_tracker.add_log(
+            f"🗺️ Uzupełnianie rejestrów Geoportal/SIDUSIS/CAMS dla {total_spatial} ofert...", level="geo"
+        )
         updated_count = 0
         for idx, item in enumerate(items, start=1):
             if global_tracker.is_cancelled():
@@ -951,14 +1002,20 @@ class ScraperPipeline:
 
             try:
                 assert item.latitude is not None and item.longitude is not None
-                geo_audit = await geoportal_service.audit_location(
+                geo_coro = geoportal_service.audit_location(
                     item.latitude,
                     item.longitude,
                     radius_meters=120,
                     category=getattr(item, "category", "dom"),
                 )
-                if not geo_audit:
-                    continue
+                aq_coro = air_quality_service.get_air_quality_audit(
+                    item.latitude,
+                    item.longitude,
+                )
+                geo_res: Any
+                aq_res: Any
+                geo_res, aq_res = await asyncio.gather(geo_coro, aq_coro, return_exceptions=True)
+                geo_audit = geo_res if isinstance(geo_res, dict) else {}
 
                 if geo_audit.get("main_parcel_id") and not item.parcel_id:
                     item.parcel_id = geo_audit["main_parcel_id"]
@@ -994,6 +1051,23 @@ class ScraperPipeline:
 
                 if geo_audit.get("gesut_networks"):
                     item.gesut_networks_data = geo_audit["gesut_networks"]
+
+                if isinstance(aq_res, dict):
+                    for ak in (
+                        "air_aqi",
+                        "air_aqi_label",
+                        "air_pm25_heating_avg",
+                        "air_pm25_summer_avg",
+                        "air_smog_days",
+                        "air_gios_station",
+                        "air_gios_dist_km",
+                        "air_gios_index",
+                        "air_smog_risk",
+                    ):
+                        if (av := aq_res.get(ak)) is not None:
+                            setattr(item, ak, av)
+                    if item.air_smog_risk is None:
+                        item.air_smog_risk = "NIEZNANE"
 
                 item_pros = list(item.pros or [])
                 item_cons = list(item.cons or [])
