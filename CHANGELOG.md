@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.10.3 (2026-09-14)
+
+### Refactoring
+
+- Apply KISS and YAGNI cleanups across pipeline, storage and dashboard
+  ([`30a4298`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/30a4298ccd271e91f12220534b82bf48b3916764))
+
+
 ## v1.10.2 (2026-09-14)
 
 ### Chores
