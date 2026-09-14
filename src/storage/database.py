@@ -357,6 +357,18 @@ async def _migrate_database_columns(conn) -> None:
                     except Exception as e:
                         logger.debug(f"[Database] Column {tbl}.{col} timestamptz migration note: {e}")
 
+            # Invalidate stale air quality cache/columns caused by previous GIOŚ pagination bug (>60km)
+            try:
+                sync_conn.execute(
+                    text(
+                        "UPDATE listings SET air_gios_station = NULL, air_gios_dist_km = NULL, air_gios_index = NULL WHERE air_gios_dist_km > 60"
+                    )
+                )
+                sync_conn.execute(text("DELETE FROM spatial_cache WHERE cache_key = 'gios:stations_list_v1'"))
+                sync_conn.execute(text("DELETE FROM spatial_cache WHERE cache_key LIKE 'air_quality:%'"))
+            except Exception as e:
+                logger.debug(f"[Database] Air quality stale cleanup note: {e}")
+
             sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)"))
             sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_desc_hash ON listings (desc_hash)"))
             sync_conn.execute(

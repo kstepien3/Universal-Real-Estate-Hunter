@@ -73,19 +73,22 @@ class AirQualityService:
 
     # Fallback list of key Polish GIOŚ stations in case the findAll endpoint is down/slow
     FALLBACK_STATIONS = [
-        {"id": 11, "name": "Rzeszów, ul. Piłsudskiego", "lat": 50.0406, "lon": 22.0003, "city": "Rzeszów"},
-        {"id": 12, "name": "Rzeszów, ul. Rejtana", "lat": 50.0261, "lon": 22.0156, "city": "Rzeszów"},
-        {"id": 13, "name": "Kraków, al. Krasińskiego", "lat": 50.0577, "lon": 19.9262, "city": "Kraków"},
-        {"id": 14, "name": "Kraków, ul. Dietla", "lat": 50.0543, "lon": 19.9436, "city": "Kraków"},
-        {"id": 15, "name": "Warszawa, ul. Marszałkowska", "lat": 52.2297, "lon": 21.0122, "city": "Warszawa"},
+        {"id": 10125, "name": "Rzeszów, Al. Piłsudskiego", "lat": 50.0407, "lon": 22.0047, "city": "Rzeszów"},
+        {"id": 671, "name": "Rzeszów, Al. Rejtana", "lat": 50.0242, "lon": 22.0106, "city": "Rzeszów"},
+        {"id": 17179, "name": "Rzeszów, ul. Starzyńskiego", "lat": 50.0604, "lon": 21.9805, "city": "Rzeszów"},
+        {"id": 20202, "name": "Krasne", "lat": 50.0439, "lon": 22.0907, "city": "Krasne"},
+        {"id": 20201, "name": "Rzeszów, ul. Kwiatkowskiego", "lat": 49.9984, "lon": 21.9922, "city": "Rzeszów"},
+        {"id": 21, "name": "Mielec, ul. Biernackiego", "lat": 50.2972, "lon": 21.4289, "city": "Mielec"},
+        {"id": 19, "name": "Krosno, ul. Ks. Popiełuszki", "lat": 49.6887, "lon": 21.7648, "city": "Krosno"},
+        {"id": 20, "name": "Jasło, ul. Szkolna", "lat": 49.7456, "lon": 21.4725, "city": "Jasło"},
+        {"id": 22, "name": "Przemyśl, ul. Sportowa", "lat": 49.7844, "lon": 22.7678, "city": "Przemyśl"},
+        {"id": 23, "name": "Tarnobrzeg, ul. Sienkiewicza", "lat": 50.5731, "lon": 21.6794, "city": "Tarnobrzeg"},
+        {"id": 400, "name": "Kraków, al. Krasińskiego", "lat": 50.0577, "lon": 19.9262, "city": "Kraków"},
+        {"id": 401, "name": "Kraków, ul. Dietla", "lat": 50.0543, "lon": 19.9436, "city": "Kraków"},
+        {"id": 544, "name": "Warszawa, ul. Marszałkowska", "lat": 52.2297, "lon": 21.0122, "city": "Warszawa"},
         {"id": 16, "name": "Wrocław, ul. Wiśniowa", "lat": 51.0863, "lon": 17.0261, "city": "Wrocław"},
         {"id": 17, "name": "Katowice, ul. Kossutha", "lat": 50.2649, "lon": 18.9714, "city": "Katowice"},
         {"id": 18, "name": "Lublin, ul. Obywatelska", "lat": 51.2589, "lon": 22.5636, "city": "Lublin"},
-        {"id": 19, "name": "Krosno, ul. Ks. Popiełuszki", "lat": 49.6887, "lon": 21.7648, "city": "Krosno"},
-        {"id": 20, "name": "Jasło, ul. Szkolna", "lat": 49.7456, "lon": 21.4725, "city": "Jasło"},
-        {"id": 21, "name": "Mielec, ul. Biernackiego", "lat": 50.2972, "lon": 21.4289, "city": "Mielec"},
-        {"id": 22, "name": "Przemyśl, ul. Sportowa", "lat": 49.7844, "lon": 22.7678, "city": "Przemyśl"},
-        {"id": 23, "name": "Tarnobrzeg, ul. Sienkiewicza", "lat": 50.5731, "lon": 21.6794, "city": "Tarnobrzeg"},
     ]
 
     MONTH_NAMES_PL = ["Sty", "Lut", "Mar", "Kwi", "Maj", "Cze", "Lip", "Sie", "Wrz", "Paź", "Lis", "Gru"]
@@ -132,7 +135,8 @@ class AirQualityService:
 
     async def get_gios_stations(self, client: httpx.AsyncClient) -> list[dict[str, Any]]:
         """
-        Fetches and caches the list of Polish air monitoring stations from GIOŚ.
+        Fetches and caches the list of all Polish air monitoring stations from GIOŚ.
+        Uses size=500 pagination parameter and iterates all pages so stations nationwide are loaded.
         Returns a list of parsed dicts: {id, name, lat, lon, city}.
         """
         now = datetime.now(UTC).timestamp()
@@ -140,36 +144,67 @@ class AirQualityService:
             return self._cached_stations
 
         # Check DB cache
-        db_cache = await self._get_cached("gios:stations_list_v1")
-        if db_cache and isinstance(db_cache.get("stations"), list):
+        db_cache = await self._get_cached("gios:stations_list_v2")
+        if db_cache and isinstance(db_cache.get("stations"), list) and len(db_cache["stations"]) > 50:
             self._cached_stations = db_cache["stations"]
             self._stations_fetched_at = now
             return self._cached_stations
 
         parsed_stations: list[dict[str, Any]] = []
+
+        def _extract_stations(items: list[Any]) -> None:
+            for s in items:
+                if not isinstance(s, dict):
+                    continue
+                try:
+                    s_id = s.get("Identyfikator stacji") or s.get("id")
+                    s_name = s.get("Nazwa stacji") or s.get("stationName")
+                    s_lat = float(s.get("WGS84 \u03c6 N") or s.get("gegrLat") or 0.0)
+                    s_lon = float(s.get("WGS84 \u03bb E") or s.get("gegrLon") or 0.0)
+                    s_city = s.get("Nazwa miasta") or ""
+                    if s_id and s_lat and s_lon:
+                        parsed_stations.append(
+                            {"id": int(s_id), "name": s_name, "lat": s_lat, "lon": s_lon, "city": s_city}
+                        )
+                except (ValueError, TypeError):
+                    continue
+
         try:
-            resp = await client.get(self.GIOS_STATIONS_URL, timeout=self.timeout)
+            resp = await client.get(self.GIOS_STATIONS_URL, params={"size": 500}, timeout=self.timeout)
             if resp.status_code == 200:
                 data = resp.json()
                 if isinstance(data, dict):
                     raw_list = data.get("Lista stacji pomiarowych") or []
+                    total_pages = int(data.get("totalPages") or 1)
                 elif isinstance(data, list):
                     raw_list = data
+                    total_pages = 1
                 else:
                     raw_list = []
-                for s in raw_list:
-                    try:
-                        s_id = s.get("Identyfikator stacji")
-                        s_name = s.get("Nazwa stacji")
-                        s_lat = float(s.get("WGS84 \u03c6 N") or s.get("gegrLat") or 0.0)
-                        s_lon = float(s.get("WGS84 \u03bb E") or s.get("gegrLon") or 0.0)
-                        s_city = s.get("Nazwa miasta") or ""
-                        if s_id and s_lat and s_lon:
-                            parsed_stations.append(
-                                {"id": s_id, "name": s_name, "lat": s_lat, "lon": s_lon, "city": s_city}
+                    total_pages = 1
+
+                _extract_stations(raw_list)
+
+                if total_pages > 1:
+                    for page_idx in range(1, total_pages):
+                        try:
+                            p_resp = await client.get(
+                                self.GIOS_STATIONS_URL,
+                                params={"size": 500, "page": page_idx},
+                                timeout=self.timeout,
                             )
-                    except (ValueError, TypeError):
-                        continue
+                            if p_resp.status_code == 200:
+                                p_data = p_resp.json()
+                                p_list = (
+                                    p_data.get("Lista stacji pomiarowych") or []
+                                    if isinstance(p_data, dict)
+                                    else p_data
+                                    if isinstance(p_data, list)
+                                    else []
+                                )
+                                _extract_stations(p_list)
+                        except Exception as p_err:
+                            logger.debug(f"[AirQuality] Failed to fetch GIOŚ stations page {page_idx}: {p_err}")
         except Exception as e:
             logger.debug(f"[AirQuality] Failed to fetch GIOŚ stations from API: {e}")
 
@@ -178,7 +213,7 @@ class AirQualityService:
 
         self._cached_stations = parsed_stations
         self._stations_fetched_at = now
-        await self._set_cached("gios:stations_list_v1", {"stations": parsed_stations}, ttl_days=30)
+        await self._set_cached("gios:stations_list_v2", {"stations": parsed_stations}, ttl_days=30)
         return parsed_stations
 
     def find_nearest_station(
@@ -324,7 +359,10 @@ class AirQualityService:
         if not force_refresh:
             cached = await self._get_cached(cache_key)
             if cached and "air_aqi" in cached:
-                return cached
+                cached_dist = cached.get("air_gios_dist_km")
+                # Do not use stale cache from previous pagination bug where stations > 60km away were picked
+                if cached_dist is None or cached_dist <= 60:
+                    return cached
 
         # Default fallback structure
         audit_result: dict[str, Any] = {
