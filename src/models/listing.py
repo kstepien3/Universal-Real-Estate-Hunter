@@ -1,5 +1,6 @@
+from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -61,6 +62,60 @@ def apply_if_present(target: Any, source: Any, fields: tuple[str, ...], *, fill_
         if fill_missing and getattr(target, field, None) is not None:
             continue
         setattr(target, field, value)
+
+
+_E = TypeVar("_E")
+
+
+def _enum_or_none(cls: Callable[[Any], _E], val: Any) -> _E | None:
+    try:
+        return cls(val) if val is not None else None
+    except (ValueError, TypeError):
+        return None
+
+
+def restore_cached_details(listing: "ListingSchema", existing_model: Any) -> None:
+    """Restore cached description, enums, flags, and spatial fields from a previously saved model."""
+    if not listing.raw_description and existing_model.raw_description:
+        listing.raw_description = existing_model.raw_description
+    if listing.finish_condition == FinishCondition.NIEOKRESLONY and (
+        fc := _enum_or_none(FinishCondition, existing_model.finish_condition)
+    ):
+        listing.finish_condition = fc
+    if listing.sewerage == SewerageType.NIEZNANA and (st := _enum_or_none(SewerageType, existing_model.sewerage)):
+        listing.sewerage = st
+    if listing.heating == HeatingType.NIEZNANE and (ht := _enum_or_none(HeatingType, existing_model.heating)):
+        listing.heating = ht
+    if not listing.has_fiber:
+        listing.has_fiber = bool(existing_model.has_fiber)
+    if not listing.has_visualisations:
+        listing.has_visualisations = bool(existing_model.has_visualisations)
+    if not listing.year_built:
+        listing.year_built = existing_model.year_built
+    if not listing.coordinates and existing_model.latitude and existing_model.longitude:
+        listing.coordinates = (existing_model.latitude, existing_model.longitude)
+    if listing.building_type == BuildingType.INNY and (
+        bt := _enum_or_none(BuildingType, getattr(existing_model, "building_type", None))
+    ):
+        listing.building_type = bt
+    if listing.access_road_type == RoadType.NIEZNANA and (
+        rt := _enum_or_none(RoadType, getattr(existing_model, "access_road_type", None))
+    ):
+        listing.access_road_type = rt
+    if listing.market == MarketType.NIEOKRESLONY and (
+        mt := _enum_or_none(MarketType, getattr(existing_model, "market", None))
+    ):
+        listing.market = mt
+    if not listing.parcel_id and existing_model.parcel_id:
+        listing.parcel_id = existing_model.parcel_id
+        listing.cadastral_area = existing_model.cadastral_area
+        listing.geoportal_url = existing_model.geoportal_url
+        listing.mpzp_zone = getattr(existing_model, "mpzp_zone", None)
+        listing.mpzp_status = getattr(existing_model, "mpzp_status", None)
+        listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
+        listing.gesut_networks = getattr(existing_model, "gesut_networks_data", None)
+
+    apply_if_present(listing, existing_model, GEO_FIELDS, fill_missing=True)
 
 
 class Coordinates(BaseModel):

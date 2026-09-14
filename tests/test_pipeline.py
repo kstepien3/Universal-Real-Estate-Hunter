@@ -68,6 +68,12 @@ def make_unqualified_result(**ai_fields) -> FilterResult:
 
 
 def make_pipeline(llm_enabled: bool, engine_mock) -> ScraperPipeline:
+    from src.filters import QualificationEngine
+
+    if isinstance(getattr(engine_mock, "precheck_stage1", None), AsyncMock):
+        engine_mock.precheck_stage1 = MagicMock(return_value=(True, [], None))
+    if isinstance(getattr(engine_mock, "apply_spatial_findings", None), AsyncMock):
+        engine_mock.apply_spatial_findings = QualificationEngine().apply_spatial_findings
     pipeline = ScraperPipeline(
         scrapers=[MagicMock()],
         discord_notifier=AsyncMock(),

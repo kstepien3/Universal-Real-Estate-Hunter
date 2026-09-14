@@ -1,5 +1,5 @@
 from .enums import BuildingType, MarketType, QualificationStatus, RoadType, SegmentSubtype
-from .listing import Coordinates, FilterResult, ListingSchema, RawListing
+from .listing import Coordinates, FilterResult, ListingSchema, RawListing, restore_cached_details
 
 __all__ = [
     "BuildingType",
@@ -11,4 +11,5 @@ __all__ = [
     "FilterResult",
     "ListingSchema",
     "RawListing",
+    "restore_cached_details",
 ]
