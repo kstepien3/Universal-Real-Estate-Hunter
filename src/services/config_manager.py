@@ -461,6 +461,11 @@ class SearchConfig(BaseModel):
     ollama_timeout_seconds: float = 180.0
     ollama_temperature: float = 0.0
     ollama_num_ctx: int = 8192
+    local_llm_base_url: str = "http://localhost:1234/v1"
+    local_llm_model: str = ""
+    local_llm_api_key: str = "not-needed"
+    local_llm_temperature: float = 0.0
+    local_llm_timeout_seconds: float = 120.0
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
     capex: CapexSettings = Field(default_factory=CapexSettings)
 
@@ -477,6 +482,13 @@ class SearchConfig(BaseModel):
                 "ollama_model",
                 "ollama_base_url",
                 "ollama_timeout_seconds",
+                "ollama_temperature",
+                "ollama_num_ctx",
+                "local_llm_base_url",
+                "local_llm_model",
+                "local_llm_api_key",
+                "local_llm_temperature",
+                "local_llm_timeout_seconds",
                 "openrouter_model",
                 "capex",
             )
@@ -658,6 +670,22 @@ class ConfigManager:
                 current_dict["ollama_num_ctx"] = max(1024, int(updates["ollama_num_ctx"]))
             except (TypeError, ValueError):
                 pass
+        if "local_llm_base_url" in updates and updates["local_llm_base_url"]:
+            current_dict["local_llm_base_url"] = str(updates["local_llm_base_url"]).strip().rstrip("/")
+        if "local_llm_model" in updates and updates["local_llm_model"] is not None:
+            current_dict["local_llm_model"] = str(updates["local_llm_model"]).strip()
+        if "local_llm_api_key" in updates and updates["local_llm_api_key"] is not None:
+            current_dict["local_llm_api_key"] = str(updates["local_llm_api_key"]).strip()
+        if "local_llm_temperature" in updates and updates["local_llm_temperature"] is not None:
+            try:
+                current_dict["local_llm_temperature"] = max(0.0, min(1.0, float(updates["local_llm_temperature"])))
+            except (TypeError, ValueError):
+                pass
+        if "local_llm_timeout_seconds" in updates and updates["local_llm_timeout_seconds"] is not None:
+            try:
+                current_dict["local_llm_timeout_seconds"] = max(10.0, float(updates["local_llm_timeout_seconds"]))
+            except (TypeError, ValueError):
+                pass
 
         # Support updating first/active profile directly if flat keys were provided
         flat_keys = {
@@ -676,6 +704,11 @@ class ConfigManager:
                 "ollama_timeout_seconds",
                 "ollama_temperature",
                 "ollama_num_ctx",
+                "local_llm_base_url",
+                "local_llm_model",
+                "local_llm_api_key",
+                "local_llm_temperature",
+                "local_llm_timeout_seconds",
                 "openrouter_model",
             )
         }

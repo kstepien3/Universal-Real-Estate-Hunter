@@ -763,6 +763,18 @@
             if (document.getElementById('cfgOpenRouterModel')) {
                 document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
             }
+            if (document.getElementById('cfgLocalLlmBaseUrl')) {
+                document.getElementById('cfgLocalLlmBaseUrl').value = activeConfig.local_llm_base_url || 'http://localhost:1234/v1';
+            }
+            if (document.getElementById('cfgLocalLlmModel')) {
+                document.getElementById('cfgLocalLlmModel').value = activeConfig.local_llm_model || '';
+            }
+            if (document.getElementById('cfgLocalLlmApiKey')) {
+                document.getElementById('cfgLocalLlmApiKey').value = activeConfig.local_llm_api_key || 'not-needed';
+            }
+            if (document.getElementById('cfgLocalLlmTimeout')) {
+                document.getElementById('cfgLocalLlmTimeout').value = activeConfig.local_llm_timeout_seconds ?? 120;
+            }
 
             const capex = activeConfig.capex || {};
             if (document.getElementById('cfgCapexDeveloper')) {
@@ -851,7 +863,11 @@
                 ollama_timeout_seconds: parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || 180,
                 ollama_temperature: parseFloat(document.getElementById('cfgOllamaTemperature')?.value) || 0.0,
                 ollama_num_ctx: parseInt(document.getElementById('cfgOllamaNumCtx')?.value, 10) || 8192,
-                openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro'
+                openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro',
+                local_llm_base_url: document.getElementById('cfgLocalLlmBaseUrl')?.value?.trim() || 'http://localhost:1234/v1',
+                local_llm_model: document.getElementById('cfgLocalLlmModel')?.value?.trim() || '',
+                local_llm_api_key: document.getElementById('cfgLocalLlmApiKey')?.value?.trim() || 'not-needed',
+                local_llm_timeout_seconds: parseFloat(document.getElementById('cfgLocalLlmTimeout')?.value) || 120
             };
 
             try {
@@ -2501,13 +2517,30 @@
             if (!desc) return;
             if (val === 'ollama') {
                 desc.textContent = 'Wymusza użycie lokalnego serwera Ollama na Twoim komputerze (bezpłatnie, 100% prywatności).';
+            } else if (val === 'local_openai') {
+                desc.textContent = 'Wymusza użycie lokalnego serwera OpenAI (LM Studio, vLLM, Docker Model Runner, LocalAI).';
             } else if (val === 'openrouter') {
                 desc.textContent = 'Wymusza użycie chmurowego OpenRouter (wymaga klucza OPENROUTER_API_KEY w .env).';
             } else if (val === 'openai') {
                 desc.textContent = 'Wymusza użycie oficjalnego OpenAI API (wymaga klucza OPENAI_API_KEY w .env).';
             } else {
-                desc.textContent = 'Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalną Ollamę.';
+                desc.textContent = 'Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalny serwer i Ollamę.';
             }
+        }
+
+        function setLocalLlmPreset(preset) {
+            const urlInput = document.getElementById('cfgLocalLlmBaseUrl');
+            if (!urlInput) return;
+            if (preset === 'lmstudio') {
+                urlInput.value = 'http://localhost:1234/v1';
+            } else if (preset === 'vllm') {
+                urlInput.value = 'http://localhost:8000/v1';
+            } else if (preset === 'docker') {
+                urlInput.value = 'http://localhost:8080/v1';
+            } else if (preset === 'ollama_v1') {
+                urlInput.value = 'http://localhost:11434/v1';
+            }
+            showToast('Ustawiono adres serwera: ' + urlInput.value);
         }
 
         function onOllamaSelectChange(val) {
@@ -2607,11 +2640,15 @@
             const requestedOllamaTimeout = parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || null;
             const requestedOllamaTemp = parseFloat(document.getElementById('cfgOllamaTemperature')?.value) ?? null;
             const requestedOllamaCtx = parseInt(document.getElementById('cfgOllamaNumCtx')?.value, 10) || null;
+            const requestedLocalUrl = document.getElementById('cfgLocalLlmBaseUrl')?.value?.trim() || null;
+            const requestedLocalModel = document.getElementById('cfgLocalLlmModel')?.value?.trim() || null;
+            const requestedLocalKey = document.getElementById('cfgLocalLlmApiKey')?.value?.trim() || null;
+            const requestedLocalTimeout = parseFloat(document.getElementById('cfgLocalLlmTimeout')?.value) || null;
 
             if (btn) btn.disabled = true;
             if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
             if (container && !isAuto) {
-                container.innerHTML = '<div class="llm-diag-placeholder"><span class="spinner-inline"></span> Sprawdzanie połączeń z OpenRouter, OpenAI oraz Ollama...</div>';
+                container.innerHTML = '<div class="llm-diag-placeholder"><span class="spinner-inline"></span> Sprawdzanie połączeń z OpenRouter, OpenAI, lokalnym serwerem i Ollama...</div>';
             }
 
             try {
@@ -2621,6 +2658,10 @@
                     ollama_timeout_seconds: requestedOllamaTimeout,
                     ollama_temperature: requestedOllamaTemp,
                     ollama_num_ctx: requestedOllamaCtx,
+                    local_llm_base_url: requestedLocalUrl,
+                    local_llm_model: requestedLocalModel,
+                    local_llm_api_key: requestedLocalKey,
+                    local_llm_timeout_seconds: requestedLocalTimeout,
                     openrouter_model: requestedOpenRouter,
                     llm_provider: requestedProvider
                 });
@@ -2652,6 +2693,7 @@
             const or = p.openrouter || {};
             const oa = p.openai || {};
             const ol = p.ollama || {};
+            const loc = p.local_openai || {};
 
             // Dynamically refresh the Ollama select with detected installed models
             if (ol.installed_models) {
@@ -2775,6 +2817,36 @@
                 }
             }
 
+            let localChips = '';
+            if (loc.installed_models && loc.installed_models.length > 0) {
+                localChips = `
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                        Wykryte modele na serwerze (kliknij, aby wybrać do konfiguracji):
+                        <div class="llm-models-tags">
+                            ${loc.installed_models.map(m => `<span class="llm-model-tag" onclick="document.getElementById('cfgLocalLlmModel').value='${escapeHtml(m)}'">${escapeHtml(m)}</span>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            const localAiRow = `
+                <div class="llm-provider-row" style="flex-direction:column;align-items:stretch;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div class="llm-provider-title-row" style="flex:1;">
+                            <span class="llm-dot ${getDotClass(loc.status)}"></span>
+                            <span class="llm-provider-name">Lokalny OpenAI (LM Studio / vLLM)</span>
+                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(loc.model || 'auto')})</span>
+                            ${getStatusBadge(loc.status)}
+                        </div>
+                        <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">${escapeHtml(loc.url || 'http://localhost:1234/v1')}</span>
+                    </div>
+                    <div class="llm-provider-msg" style="margin-top:4px;">
+                        ${escapeHtml(loc.message || '')}
+                    </div>
+                    ${localChips}
+                </div>
+            `;
+
             const olRow = `
                 <div class="llm-provider-row" style="flex-direction:column;align-items:stretch;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
@@ -2800,6 +2872,7 @@
                 <div class="llm-provider-list">
                     ${orRow}
                     ${oaRow}
+                    ${localAiRow}
                     ${olRow}
                 </div>
             `;

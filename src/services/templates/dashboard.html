@@ -904,17 +904,18 @@
                     <div class="config-field" style="margin-top:14px;">
                         <label for="cfgLlmProvider">Aktywny dostawca AI (LLM):</label>
                         <select id="cfgLlmProvider" onchange="onLlmProviderChange(this.value)">
-                            <option value="auto">Automatyczny (OpenRouter ➔ OpenAI ➔ Ollama)</option>
+                            <option value="auto">Automatyczny (OpenRouter ➔ OpenAI ➔ Lokalny ➔ Ollama)</option>
                             <option value="ollama">Ollama (lokalny na Twoim komputerze)</option>
+                            <option value="local_openai">Lokalny serwer OpenAI (LM Studio / vLLM / Docker)</option>
                             <option value="openrouter">OpenRouter (chmura)</option>
                             <option value="openai">OpenAI (chmura)</option>
                         </select>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="llmProviderDesc">
-                            Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalną Ollamę.
+                            Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalny serwer i Ollamę.
                         </div>
                     </div>
 
-                    <div class="config-field" style="margin-top:14px;">
+                    <div class="config-field" id="ollamaConfigSection" style="margin-top:14px;">
                         <div class="config-row2">
                             <div class="config-field">
                                 <label for="cfgOllamaBaseUrl">Adres Ollama (Base URL):</label>
@@ -971,6 +972,40 @@
                         </details>
                     </div>
 
+                    <!-- Konfiguracja Lokalnego Serwera OpenAI (LM Studio / vLLM / LocalAI / Docker) -->
+                    <div class="config-field" id="localOpenAiField" style="margin-top:14px;">
+                        <label>Lokalny serwer OpenAI (LM Studio / vLLM / Docker / LocalAI):</label>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+                            <button type="button" class="btn btn-sm" onclick="setLocalLlmPreset('lmstudio')">Preset: LM Studio (1234)</button>
+                            <button type="button" class="btn btn-sm" onclick="setLocalLlmPreset('vllm')">Preset: vLLM (8000)</button>
+                            <button type="button" class="btn btn-sm" onclick="setLocalLlmPreset('docker')">Preset: Docker / LocalAI (8080)</button>
+                            <button type="button" class="btn btn-sm" onclick="setLocalLlmPreset('ollama_v1')">Preset: Ollama v1 (11434)</button>
+                        </div>
+                        <div class="config-row2">
+                            <div class="config-field">
+                                <label for="cfgLocalLlmBaseUrl">Base URL (OpenAI-compatible):</label>
+                                <input type="text" id="cfgLocalLlmBaseUrl" placeholder="http://localhost:1234/v1" style="width:100%;">
+                            </div>
+                            <div class="config-field">
+                                <label for="cfgLocalLlmModel">Model (lub puste = auto / pierwszy wykryty):</label>
+                                <input type="text" id="cfgLocalLlmModel" placeholder="np. qwen2.5-7b-instruct" style="width:100%;">
+                            </div>
+                        </div>
+                        <div class="config-row2" style="margin-top:8px;">
+                            <div class="config-field">
+                                <label for="cfgLocalLlmApiKey">Klucz API (opcjonalny / domyślnie zbędny):</label>
+                                <input type="text" id="cfgLocalLlmApiKey" placeholder="not-needed" style="width:100%;">
+                            </div>
+                            <div class="config-field">
+                                <label for="cfgLocalLlmTimeout">Timeout generowania (s):</label>
+                                <input type="number" id="cfgLocalLlmTimeout" placeholder="120" step="10" min="10" style="width:100%;">
+                            </div>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;" id="localLlmHint">
+                            Obsługuje dowolny serwer zgodny ze standardem OpenAI (/v1). W Dockerze użyj <code>http://host.docker.internal:...</code>.
+                        </div>
+                    </div>
+
                     <div class="config-field" id="openrouterModelField" style="margin-top:14px;">
                         <label for="cfgOpenRouterModel">Model dla OpenRouter (chmura):</label>
                         <div class="config-input-chips-group">
@@ -1007,13 +1042,13 @@
 
                         <div id="llmStatusContainer" class="llm-status-container">
                             <div class="llm-diag-placeholder">
-                                Kliknij „Sprawdź połączenie”, aby przetestować OpenRouter, OpenAI oraz lokalną Ollama.
+                                Kliknij „Sprawdź połączenie”, aby przetestować OpenRouter, OpenAI, lokalny serwer OpenAI (LM Studio/vLLM) oraz Ollama.
                             </div>
                         </div>
                     </div>
 
                     <div class="hint-box" style="margin-top:12px;">
-                        <strong>Łańcuch awaryjny (fallback):</strong> OpenRouter &rarr; OpenAI &rarr; Ollama (lokalnie) &rarr; Reguły regex.<br>
+                        <strong>Łańcuch awaryjny (fallback):</strong> OpenRouter &rarr; OpenAI &rarr; Lokalny OpenAI &rarr; Ollama &rarr; Reguły regex.<br>
                         Oferty z niezmienionym opisem i istniejącą analizą nie są ponownie wysyłane do LLM (oszczędność kosztów).
                     </div>
                 </div>

@@ -165,4 +165,107 @@ async def test_ollama_speed_metrics_and_connection_payload() -> None:
         conn_res = await analyzer.test_connection()
         assert "hardware_profile" in conn_res
         assert "suggested_models" in conn_res
+        assert "local_openai" in conn_res["providers"]
         assert conn_res["hardware_profile"]["recommended_model"] is not None
+
+
+def test_config_manager_local_openai_roundtrip() -> None:
+    cfg = SearchConfig(
+        local_llm_base_url="http://localhost:1234/v1",
+        local_llm_model="qwen2.5-7b-instruct",
+        local_llm_api_key="lm-studio-key",
+        local_llm_timeout_seconds=90.0,
+    )
+    dumped = cfg.model_dump()
+    assert dumped["local_llm_base_url"] == "http://localhost:1234/v1"
+    assert dumped["local_llm_model"] == "qwen2.5-7b-instruct"
+    assert dumped["local_llm_api_key"] == "lm-studio-key"
+    assert dumped["local_llm_timeout_seconds"] == 90.0
+
+    updated = config_manager.update_config(
+        {
+            "local_llm_base_url": "http://localhost:8000/v1",
+            "local_llm_model": "vllm-model",
+            "local_llm_api_key": "vllm-key",
+            "local_llm_timeout_seconds": 60.0,
+        }
+    )
+    assert updated.local_llm_base_url == "http://localhost:8000/v1"
+    assert updated.local_llm_model == "vllm-model"
+    assert updated.local_llm_api_key == "vllm-key"
+    assert updated.local_llm_timeout_seconds == 60.0
+
+    # Reset back to default
+    config_manager.update_config(
+        {
+            "local_llm_base_url": "http://localhost:1234/v1",
+            "local_llm_model": "",
+            "local_llm_api_key": "not-needed",
+            "local_llm_timeout_seconds": 120.0,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_local_openai_connection_and_routing() -> None:
+    from src.models.enums import FinishCondition, PropertyCategory
+    from src.models.listing import ListingSchema
+
+    analyzer = LLMAnalyzer(
+        enabled=True,
+        llm_provider="local_openai",
+        local_llm_base_url="http://localhost:1234/v1",
+        local_llm_model="qwen2.5-7b-instruct",
+    )
+
+    # 1. Unreachable server
+    with patch("httpx.AsyncClient.get", side_effect=Exception("Connection refused")):
+        res = await analyzer.test_local_openai()
+        assert res["status"] == "unreachable"
+        assert res["configured"] is True
+
+    # 2. Server ok with models
+    mock_models_resp = MagicMock(status_code=200)
+    mock_models_resp.json.return_value = {"data": [{"id": "qwen2.5-7b-instruct"}, {"id": "bielik-11b"}]}
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_models_resp
+        res = await analyzer.test_local_openai()
+        assert res["status"] == "ok"
+        assert "qwen2.5-7b-instruct" in res["installed_models"]
+        assert "bielik-11b" in res["installed_models"]
+        assert res["model"] == "qwen2.5-7b-instruct"
+
+        # Verify test_connection picks local_openai as active provider
+        with (
+            patch.object(analyzer, "test_openrouter", return_value={"status": "not_configured"}),
+            patch.object(analyzer, "test_openai", return_value={"status": "not_configured"}),
+            patch.object(analyzer, "test_ollama", return_value={"status": "unreachable"}),
+        ):
+            conn_res = await analyzer.test_connection()
+            assert conn_res["active_provider"]["id"] == "local_openai"
+            assert conn_res["has_working_provider"] is True
+
+    # 3. Execution routing to _call_local_openai
+    mock_completion_result = {
+        "finish_condition": "do zamieszkania",
+        "worth_interest": True,
+        "summary": "Wykończony segment.",
+    }
+    with patch.object(analyzer, "_call_local_openai", return_value=mock_completion_result) as mock_call:
+        dummy_listing = ListingSchema(
+            id="test-local-llm-1",
+            portal="Otodom",
+            title="Ładny dom pod klucz",
+            price=800000,
+            price_per_m2=6500,
+            area_home=120,
+            location_raw="Rzeszów",
+            category=PropertyCategory.DOM,
+            finish_condition=FinishCondition.DO_ZAMIESZKANIA,
+            url="https://otodom.pl/test-local-llm-1",
+            raw_description="Kuchnia w zabudowie, parkiety dębowe, gotowy do wprowadzenia.",
+        )
+        result = await analyzer.analyze_description(dummy_listing)
+        assert result == mock_completion_result
+        assert mock_call.called
