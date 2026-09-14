@@ -1075,8 +1075,14 @@
 
             const priced = viewItems.filter(i => i.price_per_m2 > 0);
             const avg = priced.length > 0 ? priced.reduce((acc, c) => acc + c.price_per_m2, 0) / priced.length : 0;
-            safeSet('stAvgPrice', Math.round(avg).toLocaleString('pl-PL') + ' zł/m²');
-            safeSet('stAvgCount', priced.length);
+            safeSet('stAvgPrice', avg > 0 ? Math.round(avg).toLocaleString('pl-PL') + ' zł/m²' : '—');
+
+            // Fade pipeline items with 0 count
+            document.querySelectorAll('.pipe-item').forEach(btn => {
+                const b = btn.querySelector('b');
+                const isZero = b && (b.innerText.trim() === '0' || b.innerText.trim() === '');
+                btn.classList.toggle('pipe-empty', isZero && !btn.classList.contains('active'));
+            });
 
             const countEl = document.getElementById('profileDropCount');
             if (countEl) countEl.innerText = countAll;
@@ -1197,11 +1203,17 @@
             return filtered;
         }
 
-        function updateFilteredCount(count) {
+        function updateFilteredCount(count, filteredItems) {
             const cntEl = document.getElementById('cntFiltered');
             if (cntEl) cntEl.innerText = count;
             const tglEl = document.getElementById('tglListCount');
             if (tglEl) tglEl.innerText = count;
+            if (filteredItems && Array.isArray(filteredItems)) {
+                const priced = filteredItems.filter(i => i.price_per_m2 > 0);
+                const avg = priced.length > 0 ? priced.reduce((acc, c) => acc + c.price_per_m2, 0) / priced.length : 0;
+                const avgEl = document.getElementById('stAvgPrice');
+                if (avgEl) avgEl.innerText = avg > 0 ? Math.round(avg).toLocaleString('pl-PL') + ' zł/m²' : '—';
+            }
         }
 
         function debouncedApplyFilters() {
@@ -1213,7 +1225,7 @@
             const baseListings = getListingsForActiveProfile();
             updateStats(baseListings);
             const filtered = computeFilteredItems();
-            updateFilteredCount(filtered.length);
+            updateFilteredCount(filtered.length, filtered);
             renderGrid(filtered);
             renderMapMarkers(filtered);
             renderFilterTokens();
@@ -1223,7 +1235,7 @@
             const baseListings = getListingsForActiveProfile();
             updateStats(baseListings);
             const filtered = computeFilteredItems();
-            updateFilteredCount(filtered.length);
+            updateFilteredCount(filtered.length, filtered);
             renderGridIncremental(filtered, changedSet);
             updateMapMarkers(filtered, changedSet, removedSet);
             renderFilterTokens();
@@ -1318,35 +1330,34 @@
             document.body.classList.remove('filters-open');
         }
 
+        function formatShortPrice(price) {
+            if (!price || isNaN(price) || price <= 0) return 'b/d';
+            return price >= 1e6
+                ? (price / 1e6).toFixed(2).replace(/\.00$/, '') + 'M'
+                : price >= 1e3 ? Math.round(price / 1e3) + 'k' : String(Math.round(price));
+        }
+
         // ========================
         // Map markers
         // ========================
         function addMapMarker(item) {
             let pinClass = "pin-blue";
             const cat = item.category || 'dom';
-            let pinChar = cat === 'mieszkanie' ? 'M' : (cat === 'dzialka' ? 'Z' : 'D');
 
             if (item.user_status === 'FAVORITE') {
                 pinClass = "pin-gold";
-                pinChar = "★";
             } else if (item.user_status === 'TO_VISIT') {
                 pinClass = "pin-purple";
-                pinChar = "W";
             } else if (item.user_status === 'CHECKED') {
                 pinClass = "pin-green";
-                pinChar = "✓";
-            } else if (item.user_status === 'REJECTED' || item.qualification_status.startsWith('REJECTED')) {
+            } else if (item.user_status === 'REJECTED' || (item.qualification_status && item.qualification_status.startsWith('REJECTED'))) {
                 pinClass = "pin-gray";
-                pinChar = "×";
             } else if (item.qualification_status === 'QUALIFIED_WHITELIST') {
                 pinClass = "pin-green";
-                pinChar = "★";
             } else if (item.qualification_status === 'NEEDS_REVIEW') {
                 pinClass = "pin-orange";
-                pinChar = "?";
             } else if (item.qualification_status === 'NEEDS_REVIEW_BORDERLINE') {
                 pinClass = "pin-orange";
-                pinChar = "≈";
             }
 
             if (!item.is_exact_coords) {
@@ -1359,12 +1370,13 @@
             const jitterLat = item.latitude + (offsetMultiplier * 0.00015);
             const jitterLon = item.longitude + (offsetMultiplier * 0.0002);
 
-            const iconHtml = `<div class="custom-pin ${pinClass}" title="${escapeHtml(item.title)}">${pinChar}</div>`;
+            const shortPrice = formatShortPrice(item.price);
+            const iconHtml = `<div class="custom-pin price-pin ${pinClass}" id="pin-${item.id}"><span class="pin-dot"></span><span class="pin-price">${shortPrice}</span></div>`;
             const icon = L.divIcon({
                 html: iconHtml,
                 className: 'custom-div-icon',
-                iconSize: [24, 24],
-                iconAnchor: [12, 12],
+                iconSize: [54, 22],
+                iconAnchor: [27, 11],
                 popupAnchor: [0, -12]
             });
 
@@ -1785,19 +1797,14 @@
                 cardCrmClass = "is-rejected";
             }
 
-            // Delta badges join the main badge in the left topbar group
+            // Physical status on photo: ONLY physical lifecycle (Nowa, Re-list, Wycofana, Korekta)
             let deltaBadge = '';
             let deltaPill = '';
-            const aiQuestions = item.ai_questions;
-            const hasAiAudit = !!(item.ai_summary || (Array.isArray(aiQuestions) ? aiQuestions.length > 0 : aiQuestions));
-            const aiBadge = hasAiAudit
-                ? `<span class="card-badge badge-ai" title="Oferta posiada analizę AI — raport w szczegółach oferty">AI</span>`
-                : '';
             if (item.relist_count && item.relist_count > 0) {
-                deltaBadge = `<span class="card-badge badge-updated" style="background: rgba(239, 68, 68, 0.9); color: #fff;" title="Wykryto powrót oferty na rynek (${item.relist_count}x re-listing)">🔁 Re-list (${item.relist_count}x)</span>`;
+                deltaBadge = `<span class="card-badge badge-relist" title="Wykryto powrót oferty na rynek (${item.relist_count}x re-listing)">🔁 Re-list (${item.relist_count}x)</span>`;
                 deltaPill = `<span class="meta-tag tag-profile" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">Re-list ${item.relist_count}x</span>`;
             } else if (item.listing_status === 'DELISTED') {
-                deltaBadge = `<span class="card-badge badge-checked" style="background: rgba(148, 163, 184, 0.5); color: #e2e8f0;">Wycofana</span>`;
+                deltaBadge = `<span class="card-badge badge-delisted">Wycofana</span>`;
                 deltaPill = `<span class="meta-tag tag-profile">Wycofana</span>`;
             } else if (item.is_new_cycle) {
                 deltaBadge = `<span class="card-badge badge-new">Nowa</span>`;
@@ -1806,10 +1813,8 @@
                 deltaBadge = `<span class="card-badge badge-updated">−${item.price_drop_amount.toLocaleString('pl-PL')} zł</span>`;
                 deltaPill = `<span class="meta-tag tag-profile">Korekta −${item.price_drop_pct}%</span>`;
             } else if (item.is_updated_cycle) {
-                deltaBadge = `<span class="card-badge badge-updated">Korekta danych</span>`;
+                deltaBadge = `<span class="card-badge badge-updated">Korekta</span>`;
                 deltaPill = `<span class="meta-tag tag-profile">Zaktualizowana</span>`;
-            } else if (item.user_status === 'CHECKED') {
-                deltaBadge = `<span class="card-badge badge-checked">Sprawdzona</span>`;
             }
 
             const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : '';
@@ -2025,9 +2030,7 @@
                     ${galleryCountBadge}
                     <div class="card-media-topbar">
                         <div class="card-badges-group">
-                            <span class="card-badge ${badgeClass}">${badgeLabel}</span>
                             ${deltaBadge}
-                            ${aiBadge}
                         </div>
                         <button type="button" class="card-fav-btn ${item.user_status === 'FAVORITE' ? 'active' : ''}" onclick="event.stopPropagation(); toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">
                             ${item.user_status === 'FAVORITE' ? '★' : '☆'}
@@ -2038,6 +2041,7 @@
                 <div class="card-content">
                     <div class="card-meta-row">
                         <span class="meta-source"><b>${catLabel}</b> · ${escapeHtml(item.portal).toUpperCase()} · #${escapeHtml(item.portal_id)}</span>
+                        <span class="workflow-badge ${badgeClass}">${badgeLabel}</span>
                         ${profileBadge}
                         ${ownerBadge}
                         ${visTag}
@@ -2052,7 +2056,7 @@
 
                     <div class="card-price-row">
                         <span class="price-main">${Math.round(item.price).toLocaleString('pl-PL')} zł</span>
-                        <span class="price-m2">${Math.round(item.price_per_m2).toLocaleString('pl-PL')} zł/m²</span>
+                        <span class="price-m2">(${Math.round(item.price_per_m2).toLocaleString('pl-PL')} zł/m²)</span>
                         ${priceArHtml}
                         ${devBadge}
                         ${daysBadge}
@@ -2140,7 +2144,7 @@
                 const item = allListings.find(i => i.id === id);
                 if (item) item.user_status = newStatus;
                 updateStats(allListings);
-                applyFilters();
+                applyFiltersIncremental(new Set([id]), new Set());
                 showToast(`Status oferty #${id}: ${newStatus}`);
             } catch (err) {
                 console.error("Status update failed:", err);
