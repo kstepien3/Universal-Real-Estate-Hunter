@@ -756,7 +756,18 @@
                 if (typeof syncLocalModelSelectWithInput === 'function') syncLocalModelSelectWithInput(locModel);
             }
             if (document.getElementById('cfgLocalBaseUrl')) {
-                document.getElementById('cfgLocalBaseUrl').value = activeConfig.local_llm_base_url || activeConfig.ollama_base_url || 'http://localhost:11434';
+                let resolvedUrl = activeConfig.local_llm_base_url;
+                if (localPreset === 'ollama') {
+                    if (!resolvedUrl || resolvedUrl.includes(':1234')) {
+                        resolvedUrl = activeConfig.ollama_base_url || 'http://localhost:11434';
+                    }
+                } else if (!resolvedUrl) {
+                    if (localPreset === 'lmstudio') resolvedUrl = 'http://localhost:1234/v1';
+                    else if (localPreset === 'vllm') resolvedUrl = 'http://localhost:8000/v1';
+                    else if (localPreset === 'docker') resolvedUrl = 'http://localhost:8080/v1';
+                    else resolvedUrl = 'http://localhost:11434';
+                }
+                document.getElementById('cfgLocalBaseUrl').value = resolvedUrl;
             }
             if (document.getElementById('cfgLocalTimeout')) {
                 document.getElementById('cfgLocalTimeout').value = activeConfig.local_llm_timeout_seconds ?? activeConfig.ollama_timeout_seconds ?? 180;
@@ -2572,14 +2583,17 @@
             }
 
             if (updateUrl && urlInput) {
+                const currentVal = urlInput.value || '';
+                const usesDockerHost = currentVal.includes('host.docker.internal');
+                const hostPrefix = usesDockerHost ? 'http://host.docker.internal' : 'http://localhost';
                 if (preset === 'ollama') {
-                    urlInput.value = 'http://localhost:11434';
+                    urlInput.value = hostPrefix + ':11434';
                 } else if (preset === 'lmstudio') {
-                    urlInput.value = 'http://localhost:1234/v1';
+                    urlInput.value = hostPrefix + ':1234/v1';
                 } else if (preset === 'vllm') {
-                    urlInput.value = 'http://localhost:8000/v1';
+                    urlInput.value = hostPrefix + ':8000/v1';
                 } else if (preset === 'docker') {
-                    urlInput.value = 'http://localhost:8080/v1';
+                    urlInput.value = hostPrefix + ':8080/v1';
                 }
                 showToast('Ustawiono adres silnika: ' + urlInput.value);
             }

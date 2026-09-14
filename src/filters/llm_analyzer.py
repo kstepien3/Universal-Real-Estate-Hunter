@@ -219,6 +219,10 @@ class LLMAnalyzer:
             or (getattr(cfg, "ollama_base_url", None) if cfg else None)
             or "http://localhost:11434"
         )
+        if self.local_llm_preset == "ollama" and ":1234" in str(raw_local_url):
+            raw_local_url = (
+                ollama_base_url or (getattr(cfg, "ollama_base_url", None) if cfg else None) or "http://localhost:11434"
+            )
         self.local_llm_base_url = self._resolve_default_ollama_url(raw_local_url)
         self.local_llm_model = (
             local_llm_model

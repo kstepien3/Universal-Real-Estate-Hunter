@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from config import settings
 
@@ -471,6 +471,12 @@ class SearchConfig(BaseModel):
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
     cloud_llm_timeout_seconds: float = 30.0
     capex: CapexSettings = Field(default_factory=CapexSettings)
+
+    @model_validator(mode="after")
+    def _normalize_local_llm_url(self) -> "SearchConfig":
+        if self.local_llm_preset == "ollama" and (not self.local_llm_base_url or ":1234" in self.local_llm_base_url):
+            self.local_llm_base_url = self.ollama_base_url or settings.OLLAMA_BASE_URL
+        return self
 
     def __getattr__(self, item: str) -> Any:
         # Transparent proxy to active/first profile for backward compatibility

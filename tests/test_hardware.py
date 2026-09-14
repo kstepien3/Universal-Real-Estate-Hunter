@@ -88,6 +88,7 @@ async def test_ollama_speed_metrics_and_connection_payload() -> None:
 
 def test_config_manager_local_openai_roundtrip() -> None:
     cfg = SearchConfig(
+        local_llm_preset="lmstudio",
         local_llm_base_url="http://localhost:1234/v1",
         local_llm_model="qwen2.5-7b-instruct",
         local_llm_api_key="lm-studio-key",
@@ -99,8 +100,17 @@ def test_config_manager_local_openai_roundtrip() -> None:
     assert dumped["local_llm_api_key"] == "lm-studio-key"
     assert dumped["local_llm_timeout_seconds"] == 90.0
 
+    # Verify that ollama preset normalizes stale 1234 to ollama_base_url
+    cfg_ollama = SearchConfig(
+        local_llm_preset="ollama",
+        local_llm_base_url="http://localhost:1234/v1",
+        ollama_base_url="http://localhost:11434",
+    )
+    assert cfg_ollama.local_llm_base_url == "http://localhost:11434"
+
     updated = config_manager.update_config(
         {
+            "local_llm_preset": "vllm",
             "local_llm_base_url": "http://localhost:8000/v1",
             "local_llm_model": "vllm-model",
             "local_llm_api_key": "vllm-key",
@@ -115,7 +125,8 @@ def test_config_manager_local_openai_roundtrip() -> None:
     # Reset back to default
     config_manager.update_config(
         {
-            "local_llm_base_url": "http://localhost:1234/v1",
+            "local_llm_preset": "ollama",
+            "local_llm_base_url": "http://localhost:11434",
             "local_llm_model": "",
             "local_llm_api_key": "not-needed",
             "local_llm_timeout_seconds": 120.0,
