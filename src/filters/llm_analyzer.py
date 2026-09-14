@@ -501,24 +501,19 @@ class LLMAnalyzer:
         Test connection to local OpenAI-compatible API servers (LM Studio, vLLM, Docker Model Runner, LocalAI).
         Queries GET /models to verify reachability and enumerate loaded models.
         """
-        urls_to_try = [self.local_llm_base_url]
-        if "localhost" in self.local_llm_base_url or "127.0.0.1" in self.local_llm_base_url:
-            alt = re.sub(r"localhost|127\.0\.0\.1", "host.docker.internal", self.local_llm_base_url)
-            if alt not in urls_to_try:
-                urls_to_try.append(alt)
-        elif "host.docker.internal" in self.local_llm_base_url:
-            alt = self.local_llm_base_url.replace("host.docker.internal", "localhost")
-            if alt not in urls_to_try:
-                urls_to_try.append(alt)
+        resolved_url = self._resolve_default_ollama_url(self.local_llm_base_url)
+        urls_to_try = [resolved_url]
+        if self.local_llm_base_url not in urls_to_try:
+            urls_to_try.append(self.local_llm_base_url)
 
         last_error_msg = ""
-        last_url = self.local_llm_base_url
+        last_url = resolved_url
         for target_url in urls_to_try:
             url = target_url.rstrip("/")
             last_url = url
             t0 = time.perf_counter()
             try:
-                models_endpoint = f"{url}/models"
+                models_endpoint = f"{url}/models" if url.endswith("/v1") else f"{url}/v1/models"
                 headers = {}
                 if self.local_llm_api_key and self.local_llm_api_key != "not-needed":
                     headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
@@ -576,12 +571,72 @@ class LLMAnalyzer:
         }
 
     async def test_connection(self) -> dict[str, Any]:
-        openrouter_res, openai_res, ollama_res, local_res = await asyncio.gather(
-            self.test_openrouter(),
-            self.test_openai(),
-            self.test_ollama(),
-            self.test_local_openai(),
+        pref = (self.llm_provider or "auto").lower().strip()
+        is_local_ollama = pref == "ollama" or (pref == "local" and self.local_llm_preset == "ollama")
+        is_local_openai = pref in ("local_openai", "lmstudio", "vllm", "docker") or (
+            pref == "local" and self.local_llm_preset != "ollama"
         )
+
+        openrouter_res: dict[str, Any] = {
+            "name": "OpenRouter",
+            "configured": bool(self.openrouter_key),
+            "status": "not_configured",
+            "model": self.openrouter_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+        openai_res: dict[str, Any] = {
+            "name": "OpenAI",
+            "configured": bool(self.openai_key),
+            "status": "not_configured",
+            "model": self.openai_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+        ollama_res: dict[str, Any] = {
+            "name": "Ollama (lokalny)",
+            "configured": True,
+            "url": self.ollama_url,
+            "status": "not_configured",
+            "model": self.ollama_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+        local_res: dict[str, Any] = {
+            "name": "Lokalny OpenAI (LM Studio / vLLM)",
+            "configured": True,
+            "url": self.local_llm_base_url,
+            "status": "not_configured",
+            "model": self.local_llm_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+
+        if is_local_ollama:
+            ollama_res = await self.test_ollama()
+        elif is_local_openai:
+            local_res = await self.test_local_openai()
+        elif pref == "openrouter":
+            openrouter_res = await self.test_openrouter()
+        elif pref == "openai":
+            openai_res = await self.test_openai()
+        else:  # "auto"
+            if self.local_llm_preset == "ollama":
+                openrouter_res, openai_res, ollama_res = await asyncio.gather(
+                    self.test_openrouter(),
+                    self.test_openai(),
+                    self.test_ollama(),
+                )
+            else:
+                openrouter_res, openai_res, local_res = await asyncio.gather(
+                    self.test_openrouter(),
+                    self.test_openai(),
+                    self.test_local_openai(),
+                )
 
         providers_map = {
             "openrouter": {
@@ -615,11 +670,10 @@ class LLMAnalyzer:
         }
 
         active_provider = None
-        pref = self.llm_provider
-        if pref == "ollama":
+        if is_local_ollama:
             if ollama_res.get("status") == "ok":
                 active_provider = providers_map["ollama"]
-        elif pref in ("local_openai", "lmstudio", "vllm", "local"):
+        elif is_local_openai:
             if local_res.get("status") == "ok":
                 active_provider = providers_map["local_openai"]
         elif pref == "openrouter":

@@ -2905,13 +2905,32 @@
                 </div>
             `;
 
+            const reqProvider = document.getElementById('cfgLlmProvider')?.value || 'auto';
+            const reqPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
+
+            const visibleRows = [];
+            if (reqProvider === 'ollama' || (reqProvider === 'local' && reqPreset === 'ollama')) {
+                visibleRows.push(olRow);
+            } else if (reqProvider === 'local_openai' || (reqProvider === 'local' && reqPreset !== 'ollama')) {
+                visibleRows.push(localAiRow);
+            } else if (reqProvider === 'openrouter') {
+                visibleRows.push(orRow);
+            } else if (reqProvider === 'openai') {
+                visibleRows.push(oaRow);
+            } else {
+                if (or.configured) visibleRows.push(orRow);
+                if (oa.configured) visibleRows.push(oaRow);
+                if (reqPreset === 'ollama') {
+                    visibleRows.push(olRow);
+                } else {
+                    visibleRows.push(localAiRow);
+                }
+            }
+
             container.innerHTML = `
                 ${bannerHtml}
                 <div class="llm-provider-list">
-                    ${orRow}
-                    ${oaRow}
-                    ${localAiRow}
-                    ${olRow}
+                    ${visibleRows.join('')}
                 </div>
             `;
         }
