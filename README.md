@@ -103,7 +103,6 @@ Universal-Real-Estate-Hunter/
 ├── search_config.json         # Live profiles, portal limits, and scheduler configuration
 ├── main.py                    # Unified CLI entrypoint
 ├── pyproject.toml             # Project metadata, ruff, pytest, bandit, semantic-release
-├── requirements.txt           # pip dependencies
 ├── .pre-commit-config.yaml    # Pre-commit hooks (ruff, security, hygiene)
 └── listings.db                # SQLite database (persisted locally or in Docker volume)
 ```
@@ -159,7 +158,7 @@ source venv/bin/activate
 .\venv\Scripts\Activate.ps1
 
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install .
 ```
 
 ### Option B: uv (recommended for development)

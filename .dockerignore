@@ -10,7 +10,6 @@ LICENSE
 CHANGELOG.md
 .pre-commit-config.yaml
 skills-lock.json
-requirements.txt
 
 # Python
 __pycache__/
