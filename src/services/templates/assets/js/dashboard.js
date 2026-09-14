@@ -929,6 +929,21 @@
             } catch (err) {
                 console.error("Failed to load listings:", err);
                 showToast("Błąd ładowania ofert z bazy danych.");
+                if (allListings.length === 0) {
+                    const container = document.getElementById('listingsContainer');
+                    if (container) {
+                        container.innerHTML = `
+                            <div style="text-align: center; padding: 48px 24px; color: var(--text-muted);">
+                                <div style="font-size: 28px; margin-bottom: 12px;">⚠️</div>
+                                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Nie udało się załadować ofert z bazy danych</div>
+                                <div style="font-size: 13px; max-width: 420px; margin: 0 auto 16px;">Wystąpił problem podczas pobierania danych z serwera. Sprawdź logi kontenera lub spróbuj ponownie.</div>
+                                <button class="btn btn-secondary" onclick="fetchListings()" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
+                                    Odśwież dane
+                                </button>
+                            </div>
+                        `;
+                    }
+                }
             }
         }
 
