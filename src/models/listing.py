@@ -15,6 +15,53 @@ from .enums import (
     SewerageType,
 )
 
+GEO_FIELDS: tuple[str, ...] = (
+    "landslide_risk",
+    "egib_building_status",
+    "egib_soil_class",
+    "noise_level_db",
+    "noise_zone",
+    "nature_protected_zone",
+    "monument_zone",
+    "cemetery_buffer_zone",
+    "broadband_status",
+    "broadband_details",
+    "parcel_front_width_m",
+    "parcel_length_m",
+    "parcel_aspect_ratio",
+    "parcel_shape_type",
+    "terrain_slope_pct",
+    "terrain_aspect",
+    "walkability_pka_dist_m",
+    "walkability_pka_name",
+    "power_lines_risk",
+)
+
+AIR_FIELDS: tuple[str, ...] = (
+    "air_aqi",
+    "air_aqi_label",
+    "air_pm25_heating_avg",
+    "air_pm25_summer_avg",
+    "air_smog_days",
+    "air_gios_station",
+    "air_gios_dist_km",
+    "air_gios_index",
+    "air_smog_risk",
+)
+
+SPATIAL_FIELDS: tuple[str, ...] = GEO_FIELDS + AIR_FIELDS
+
+
+def apply_if_present(target: Any, source: Any, fields: tuple[str, ...], *, fill_missing: bool = False) -> None:
+    """Copy non-None values from ``source`` (dict or object) onto ``target`` (object)."""
+    for field in fields:
+        value = source.get(field) if isinstance(source, dict) else getattr(source, field, None)
+        if value is None:
+            continue
+        if fill_missing and getattr(target, field, None) is not None:
+            continue
+        setattr(target, field, value)
+
 
 class Coordinates(BaseModel):
     latitude: float

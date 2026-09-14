@@ -9,7 +9,7 @@ from sqlalchemy import select
 from config import settings
 from src.filters import QualificationEngine
 from src.models.enums import FinishCondition, HeatingType, SewerageType
-from src.models.listing import ListingSchema
+from src.models.listing import AIR_FIELDS, GEO_FIELDS, SPATIAL_FIELDS, ListingSchema, apply_if_present
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
 from src.services.config_manager import SearchProfile
 from src.services.discord_notifier import DiscordNotifier
@@ -17,6 +17,10 @@ from src.services.market_analyzer import valuation_engine
 from src.services.progress import global_tracker
 from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
+
+
+def _should_notify(*, is_qualified: bool, is_new: bool, is_duplicate: bool, price_changed: bool) -> bool:
+    return is_qualified and ((is_new and not is_duplicate) or price_changed)
 
 
 class ScraperPipeline:
@@ -141,29 +145,7 @@ class ScraperPipeline:
                 listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
                 listing.gesut_networks = getattr(existing_model, "gesut_networks_data", None)
 
-            for sf in (
-                "landslide_risk",
-                "egib_building_status",
-                "egib_soil_class",
-                "noise_level_db",
-                "noise_zone",
-                "nature_protected_zone",
-                "monument_zone",
-                "cemetery_buffer_zone",
-                "broadband_status",
-                "broadband_details",
-                "parcel_front_width_m",
-                "parcel_length_m",
-                "parcel_aspect_ratio",
-                "parcel_shape_type",
-                "terrain_slope_pct",
-                "terrain_aspect",
-                "walkability_pka_dist_m",
-                "walkability_pka_name",
-                "power_lines_risk",
-            ):
-                if getattr(listing, sf, None) is None and (v := getattr(existing_model, sf, None)) is not None:
-                    setattr(listing, sf, v)
+            apply_if_present(listing, existing_model, GEO_FIELDS, fill_missing=True)
 
         # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
         is_exact_coords = True
@@ -246,47 +228,14 @@ class ScraperPipeline:
                             listing.mpzp_zone = geo_audit.get("mpzp_zone")
                             listing.mpzp_status = geo_audit.get("mpzp_status")
                             listing.flood_risk_zone = geo_audit.get("flood_risk_zone")
-                        for k in (
-                            "landslide_risk",
-                            "egib_building_status",
-                            "egib_soil_class",
-                            "noise_level_db",
-                            "noise_zone",
-                            "nature_protected_zone",
-                            "monument_zone",
-                            "cemetery_buffer_zone",
-                            "broadband_status",
-                            "broadband_details",
-                            "parcel_front_width_m",
-                            "parcel_length_m",
-                            "parcel_aspect_ratio",
-                            "parcel_shape_type",
-                            "terrain_slope_pct",
-                            "terrain_aspect",
-                            "walkability_pka_dist_m",
-                            "walkability_pka_name",
-                            "power_lines_risk",
-                            "gesut_networks",
-                        ):
-                            if (v := geo_audit.get(k)) is not None:
-                                setattr(listing, k, v)
+                        apply_if_present(listing, geo_audit, GEO_FIELDS)
+                        if (v := geo_audit.get("gesut_networks")) is not None:
+                            listing.gesut_networks = v
                     else:
                         geo_audit = None
 
                     if isinstance(aq_res, dict):
-                        for ak in (
-                            "air_aqi",
-                            "air_aqi_label",
-                            "air_pm25_heating_avg",
-                            "air_pm25_summer_avg",
-                            "air_smog_days",
-                            "air_gios_station",
-                            "air_gios_dist_km",
-                            "air_gios_index",
-                            "air_smog_risk",
-                        ):
-                            if (av := aq_res.get(ak)) is not None:
-                                setattr(listing, ak, av)
+                        apply_if_present(listing, aq_res, AIR_FIELDS)
 
                     # Log summary of spatial audit
                     parts = []
@@ -414,40 +363,9 @@ class ScraperPipeline:
             filter_result.score = min(100.0, max(0.0, new_score))
             filter_result.pros = new_pros
             filter_result.cons = new_cons
-            for sf in (
-                "mpzp_zone",
-                "flood_risk_zone",
-                "landslide_risk",
-                "egib_building_status",
-                "egib_soil_class",
-                "noise_level_db",
-                "noise_zone",
-                "nature_protected_zone",
-                "monument_zone",
-                "cemetery_buffer_zone",
-                "broadband_status",
-                "broadband_details",
-                "parcel_front_width_m",
-                "parcel_length_m",
-                "parcel_aspect_ratio",
-                "parcel_shape_type",
-                "terrain_slope_pct",
-                "terrain_aspect",
-                "walkability_pka_dist_m",
-                "walkability_pka_name",
-                "power_lines_risk",
-                "air_aqi",
-                "air_aqi_label",
-                "air_pm25_heating_avg",
-                "air_pm25_summer_avg",
-                "air_smog_days",
-                "air_gios_station",
-                "air_gios_dist_km",
-                "air_gios_index",
-                "air_smog_risk",
-            ):
-                if (val := getattr(listing, sf, None)) is not None:
-                    setattr(filter_result, sf, val)
+            apply_if_present(filter_result, listing, SPATIAL_FIELDS)
+            filter_result.mpzp_zone = listing.mpzp_zone
+            filter_result.flood_risk_zone = listing.flood_risk_zone
 
         result["qualified"] = filter_result.is_qualified
 
@@ -511,8 +429,11 @@ class ScraperPipeline:
         result["price_changed"] = price_changed
 
         # 5. Dispatch notification if qualified and unnotified
-        should_notify = filter_result.is_qualified and (
-            (is_new and not result["is_duplicate_fingerprint"]) or price_changed
+        should_notify = _should_notify(
+            is_qualified=filter_result.is_qualified,
+            is_new=is_new,
+            is_duplicate=result["is_duplicate_fingerprint"],
+            price_changed=price_changed,
         )
 
         if should_notify and db_model.notified_at is None:
@@ -577,8 +498,11 @@ class ScraperPipeline:
                     )
                 res["is_new"] = is_new
                 res["price_changed"] = price_changed
-                should_notify = filt.is_qualified and (
-                    (is_new and not res["is_duplicate_fingerprint"]) or price_changed
+                should_notify = _should_notify(
+                    is_qualified=filt.is_qualified,
+                    is_new=is_new,
+                    is_duplicate=res["is_duplicate_fingerprint"],
+                    price_changed=price_changed,
                 )
                 if should_notify and db_model.notified_at is None:
                     valuation_intel = valuation_engine.evaluate(
@@ -1025,47 +949,13 @@ class ScraperPipeline:
                     item.mpzp_status = geo_audit.get("mpzp_status")
                     item.flood_risk_zone = geo_audit.get("flood_risk_zone")
 
-                for f in (
-                    "landslide_risk",
-                    "egib_building_status",
-                    "egib_soil_class",
-                    "noise_level_db",
-                    "noise_zone",
-                    "nature_protected_zone",
-                    "monument_zone",
-                    "cemetery_buffer_zone",
-                    "broadband_status",
-                    "broadband_details",
-                    "parcel_front_width_m",
-                    "parcel_length_m",
-                    "parcel_aspect_ratio",
-                    "parcel_shape_type",
-                    "terrain_slope_pct",
-                    "terrain_aspect",
-                    "walkability_pka_dist_m",
-                    "walkability_pka_name",
-                    "power_lines_risk",
-                ):
-                    if (v := geo_audit.get(f)) is not None:
-                        setattr(item, f, v)
+                apply_if_present(item, geo_audit, GEO_FIELDS)
 
                 if geo_audit.get("gesut_networks"):
                     item.gesut_networks_data = geo_audit["gesut_networks"]
 
                 if isinstance(aq_res, dict):
-                    for ak in (
-                        "air_aqi",
-                        "air_aqi_label",
-                        "air_pm25_heating_avg",
-                        "air_pm25_summer_avg",
-                        "air_smog_days",
-                        "air_gios_station",
-                        "air_gios_dist_km",
-                        "air_gios_index",
-                        "air_smog_risk",
-                    ):
-                        if (av := aq_res.get(ak)) is not None:
-                            setattr(item, ak, av)
+                    apply_if_present(item, aq_res, AIR_FIELDS)
                     if item.air_smog_risk is None:
                         item.air_smog_risk = "NIEZNANE"
 

@@ -7,7 +7,7 @@ from sqlalchemy import delete, desc, or_, select
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.listing import FilterResult, ListingSchema
+from src.models.listing import SPATIAL_FIELDS, FilterResult, ListingSchema, apply_if_present
 
 from .database import safe_commit
 from .models import ListingModel, PriceHistoryModel
@@ -200,38 +200,7 @@ class ListingRepository:
                 existing.flood_risk_zone = listing.flood_risk_zone
             if listing.gesut_networks:
                 existing.gesut_networks_data = listing.gesut_networks
-            for f in (
-                "landslide_risk",
-                "egib_building_status",
-                "egib_soil_class",
-                "noise_level_db",
-                "noise_zone",
-                "nature_protected_zone",
-                "monument_zone",
-                "cemetery_buffer_zone",
-                "broadband_status",
-                "broadband_details",
-                "parcel_front_width_m",
-                "parcel_length_m",
-                "parcel_aspect_ratio",
-                "parcel_shape_type",
-                "terrain_slope_pct",
-                "terrain_aspect",
-                "walkability_pka_dist_m",
-                "walkability_pka_name",
-                "power_lines_risk",
-                "air_aqi",
-                "air_aqi_label",
-                "air_pm25_heating_avg",
-                "air_pm25_summer_avg",
-                "air_smog_days",
-                "air_gios_station",
-                "air_gios_dist_km",
-                "air_gios_index",
-                "air_smog_risk",
-            ):
-                if (val := getattr(listing, f, None)) is not None:
-                    setattr(existing, f, val)
+            apply_if_present(existing, listing, SPATIAL_FIELDS)
 
             # Update qualification
             existing.is_qualified = filter_result.is_qualified
