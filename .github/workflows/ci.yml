@@ -26,8 +26,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  validate:
-    name: Validate (Lint, Types, Security, Tests) — py${{ matrix.python-version }}
+  lint:
+    name: Lint, Types & Security — Python 3.12
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up uv & Python 3.12
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run Ruff (lint & format)
+        run: |
+          uv run ruff check src/ tests/ main.py
+          uv run ruff format --check src/ tests/ main.py
+
+      - name: Run mypy
+        run: uv run mypy
+
+      - name: Run Bandit
+        run: uv run bandit -c pyproject.toml -r src/ main.py -lll -iii
+
+  test:
+    name: Tests — py${{ matrix.python-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
@@ -50,31 +81,34 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
-      - name: Run Ruff (lint & format)
-        run: |
-          uv run ruff check src/ tests/ main.py
-          uv run ruff format --check src/ tests/ main.py
-
-      - name: Run mypy
-        run: uv run mypy
-
-      - name: Run Bandit
-        run: uv run bandit -c pyproject.toml -r src/ main.py -lll -iii
+      - name: Run unit tests
+        if: matrix.python-version != '3.12'
+        run: uv run pytest tests/ -q -x --tb=short -m "not integration"
 
       - name: Run unit tests with coverage
-        run: uv run pytest tests/ -q -x --tb=short -m "not integration" --cov=src --cov-report=term-missing --cov-fail-under=66
+        if: matrix.python-version == '3.12'
+        run: uv run pytest tests/ -q --tb=short -m "not integration" --cov=src --cov-report=term-missing --cov-fail-under=66
 
   docker:
     name: Docker image smoke test
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    needs: [validate]
+    needs: [lint, test]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build image
-        run: docker build -t estate-hunter:ci .
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: estate-hunter:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Smoke test image
         run: |
@@ -89,7 +123,7 @@ jobs:
       tag: ${{ steps.semantic_release.outputs.tag }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [validate]
+    needs: [lint, test]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
     permissions:
       contents: write
@@ -143,7 +177,7 @@ jobs:
     name: Build & push to GHCR (public)
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    needs: [validate, release]
+    needs: [release]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
     permissions:
       contents: read
