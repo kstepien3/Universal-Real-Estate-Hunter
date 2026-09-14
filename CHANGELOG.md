@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.11.1 (2026-09-14)
+
+### Refactoring
+
+- **ui**: Optimize split view density, analytical map pins and card layout
+  ([`c5de872`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/c5de872062fae59b4e619c87ff3e6865dbd0e5eb))
+
+
 ## v1.11.0 (2026-09-14)
 
 ### Bug Fixes
