@@ -1,8 +1,6 @@
 import asyncio
-import gzip
 import hashlib
 import json
-import time
 import webbrowser
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,10 +14,15 @@ from sqlalchemy.orm import selectinload
 from src.services.config_manager import config_manager
 from src.services.market_analyzer import valuation_engine
 from src.services.pipeline import ScraperPipeline
-from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session, init_db, safe_commit
-
-MIN_COMPRESS_SIZE = 1024
-COMPRESSIBLE_CT = ("application/javascript", "application/json", "text/css", "text/html", "text/plain")
+from src.storage import (
+    ListingModel,
+    ListingRepository,
+    PriceHistoryModel,
+    clear_medians_cache,
+    get_session,
+    init_db,
+    safe_commit,
+)
 
 
 def _as_utc(dt: "datetime | None") -> "datetime | None":
@@ -27,24 +30,6 @@ def _as_utc(dt: "datetime | None") -> "datetime | None":
     if dt is None:
         return None
     return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
-
-
-@web.middleware
-async def gzip_middleware(request: web.Request, handler):
-    response = await handler(request)
-    if response.status == 304 or response.body is None:
-        return response
-    if "Content-Encoding" in response.headers or "gzip" not in request.headers.get("Accept-Encoding", ""):
-        return response
-    if len(response.body) < MIN_COMPRESS_SIZE:
-        return response
-    if not (response.content_type or "").startswith(COMPRESSIBLE_CT):
-        return response
-    response.body = gzip.compress(response.body, compresslevel=6)
-    response.headers["Content-Encoding"] = "gzip"
-    response.headers["Vary"] = "Accept-Encoding"
-    response.headers["Content-Length"] = str(len(response.body))
-    return response
 
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.html"
@@ -70,31 +55,13 @@ else:
     INDEX_HTML = "<!DOCTYPE html><html><body><h1>Dashboard template not found</h1></body></html>"
 
 
-MEDIANS_CACHE_TTL_SECONDS = 60.0
-_medians_cache: dict[str, Any] = {"computed_at": 0.0, "data": {}}
-
-
-def invalidate_market_medians_cache() -> None:
-    _medians_cache["computed_at"] = 0.0
-    _medians_cache["data"] = {}
-
-
 class LiveDashboardServer:
     def __init__(self, host: str = "0.0.0.0", port: int = 8080):
         self.host = host
         self.port = port
-        self.app = web.Application(middlewares=[gzip_middleware])
+        self.app = web.Application()
         self._active_scrape_task: asyncio.Task[Any] | None = None
         self._setup_routes()
-
-    async def _get_market_medians_cached(self, repo: ListingRepository) -> dict[str, float]:
-        now = time.monotonic()
-        if _medians_cache["data"] and now - _medians_cache["computed_at"] < MEDIANS_CACHE_TTL_SECONDS:
-            return _medians_cache["data"]
-        data = await repo.get_market_medians()
-        _medians_cache["computed_at"] = now
-        _medians_cache["data"] = data
-        return data
 
     def _setup_routes(self):
         self.app.router.add_get("/", self.handle_index)
@@ -411,7 +378,7 @@ class LiveDashboardServer:
             items = res.scalars().all()
 
             repo = ListingRepository(session)
-            market_medians = await self._get_market_medians_cached(repo)
+            market_medians = await repo.get_market_medians()
 
             now_utc = datetime.now(UTC)
             max_scraped_at = None
@@ -841,7 +808,7 @@ class LiveDashboardServer:
             global_tracker.complete_session({"error": str(e)})
         finally:
             self._active_scrape_task = None
-            invalidate_market_medians_cache()
+            clear_medians_cache()
 
     async def handle_trigger_scrape(self, request: web.Request) -> web.Response:
         from src.services.progress import global_tracker

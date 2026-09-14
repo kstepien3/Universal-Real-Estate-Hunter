@@ -1,6 +1,7 @@
 import statistics
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from loguru import logger
 from sqlalchemy import delete, desc, or_, select
@@ -11,6 +12,10 @@ from src.models.listing import SPATIAL_FIELDS, FilterResult, ListingSchema, appl
 
 from .database import safe_commit
 from .models import ListingModel, PriceHistoryModel
+
+
+def _val(v: Any) -> str:
+    return getattr(v, "value", str(v) if v is not None else "")
 
 
 def _apply_ai_fields(model: ListingModel, result: FilterResult) -> None:
@@ -31,22 +36,18 @@ def _apply_ai_fields(model: ListingModel, result: FilterResult) -> None:
 
 def _apply_llm_cache_fields(
     model: ListingModel,
-    desc_hash: str | None,
-    llm_json: dict | None,
-    prompt_version: str | None,
-    llm_model: str | None,
+    llm_cache: dict[str, Any] | None,
 ) -> None:
-    if isinstance(desc_hash, str) and desc_hash:
-        model.desc_hash = desc_hash
-    if isinstance(llm_json, dict) and llm_json:
-        try:
-            model.llm_json_data = llm_json
-        except (TypeError, ValueError):
-            pass
-    if isinstance(prompt_version, str) and prompt_version:
-        model.llm_prompt_version = prompt_version
-    if isinstance(llm_model, str) and llm_model:
-        model.llm_model = llm_model
+    if not isinstance(llm_cache, dict):
+        return
+    if desc_hash := llm_cache.get("desc_hash"):
+        model.desc_hash = str(desc_hash)
+    if isinstance(llm_json := llm_cache.get("json"), dict):
+        model.llm_json_data = llm_json
+    if prompt_version := llm_cache.get("prompt_version"):
+        model.llm_prompt_version = str(prompt_version)
+    if llm_model := llm_cache.get("model"):
+        model.llm_model = str(llm_model)
 
 
 # In-process medians cache (TTL) to avoid a full-table scan every cycle.
@@ -117,6 +118,7 @@ class ListingRepository:
         listing: ListingSchema,
         filter_result: FilterResult,
         is_exact_coords: bool = True,
+        llm_cache: dict[str, Any] | None = None,
     ) -> tuple[ListingModel, bool, bool]:
         """
         Saves new listing or updates existing.
@@ -140,7 +142,7 @@ class ListingRepository:
             existing.price_per_m2 = listing.price_per_m2
             existing.area_home = listing.area_home
             existing.area_plot = listing.area_plot
-            existing.category = listing.category.value if hasattr(listing.category, "value") else str(listing.category)
+            existing.category = _val(listing.category)
             if listing.rooms is not None:
                 existing.rooms = listing.rooms
             if listing.floor is not None:
@@ -162,20 +164,16 @@ class ListingRepository:
             if lat and lon:
                 existing.latitude = lat
                 existing.longitude = lon
-            existing.access_road_type = listing.access_road_type.value
-            existing.market = listing.market.value
-            existing.finish_condition = (
-                listing.finish_condition.value
-                if hasattr(listing.finish_condition, "value")
-                else str(listing.finish_condition)
-            )
+            existing.access_road_type = _val(listing.access_road_type)
+            existing.market = _val(listing.market)
+            existing.finish_condition = _val(listing.finish_condition)
             # Sticky-True: False from a scraper means "not detected", not
             # "confirmed absent" (e.g. Otodom never detects fiber). Only
             # positive evidence flips the flag to True.
             if listing.has_visualisations:
                 existing.has_visualisations = True
-            existing.sewerage = listing.sewerage.value if hasattr(listing.sewerage, "value") else str(listing.sewerage)
-            existing.heating = listing.heating.value if hasattr(listing.heating, "value") else str(listing.heating)
+            existing.sewerage = _val(listing.sewerage)
+            existing.heating = _val(listing.heating)
             if listing.has_fiber:
                 existing.has_fiber = True
             if listing.year_built:
@@ -210,6 +208,7 @@ class ListingRepository:
             existing.pros = filter_result.pros
             existing.cons = filter_result.cons
             _apply_ai_fields(existing, filter_result)
+            _apply_llm_cache_fields(existing, llm_cache)
             existing.updated_at = datetime.now(UTC)
             existing.last_scraped_at = datetime.now(UTC)
 
@@ -239,7 +238,7 @@ class ListingRepository:
             price_per_m2=listing.price_per_m2,
             area_home=listing.area_home,
             area_plot=listing.area_plot,
-            category=(listing.category.value if hasattr(listing.category, "value") else str(listing.category)),
+            category=_val(listing.category),
             rooms=listing.rooms,
             floor=listing.floor,
             floors_in_building=listing.floors_in_building,
@@ -289,16 +288,12 @@ class ListingRepository:
             air_gios_dist_km=listing.air_gios_dist_km,
             air_gios_index=listing.air_gios_index,
             air_smog_risk=listing.air_smog_risk,
-            access_road_type=listing.access_road_type.value,
-            market=listing.market.value,
-            finish_condition=(
-                listing.finish_condition.value
-                if hasattr(listing.finish_condition, "value")
-                else str(listing.finish_condition)
-            ),
+            access_road_type=_val(listing.access_road_type),
+            market=_val(listing.market),
+            finish_condition=_val(listing.finish_condition),
             has_visualisations=bool(listing.has_visualisations),
-            sewerage=(listing.sewerage.value if hasattr(listing.sewerage, "value") else str(listing.sewerage)),
-            heating=(listing.heating.value if hasattr(listing.heating, "value") else str(listing.heating)),
+            sewerage=_val(listing.sewerage),
+            heating=_val(listing.heating),
             has_fiber=bool(listing.has_fiber),
             year_built=listing.year_built,
             raw_description=listing.raw_description,
@@ -314,6 +309,7 @@ class ListingRepository:
         new_model.pros = filter_result.pros
         new_model.cons = filter_result.cons
         _apply_ai_fields(new_model, filter_result)
+        _apply_llm_cache_fields(new_model, llm_cache)
         if listing.gallery_images:
             new_model.gallery_images = listing.gallery_images
         if listing.gesut_networks:
@@ -345,6 +341,7 @@ class ListingRepository:
             existing.pros = filter_result.pros
             existing.cons = filter_result.cons
             _apply_ai_fields(existing, filter_result)
+            _apply_llm_cache_fields(existing, llm_cache)
             existing.updated_at = datetime.now(UTC)
             existing.last_scraped_at = datetime.now(UTC)
             await self.session.flush()

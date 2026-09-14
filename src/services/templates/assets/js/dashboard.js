@@ -2228,6 +2228,7 @@
 
             const pct = Math.min(100, Math.max(0, st.percentage || 0));
             document.getElementById('progPercent').innerText = pct + '%';
+            document.getElementById('progBar').style.width = pct + '%';
             if (st.is_running) {
                 document.getElementById('progStep').innerText = st.current_step || 'Przetwarzanie…';
                 document.getElementById('progPortal').innerText = st.current_portal ? `Aktywny: ${st.current_portal}` : 'Inicjalizacja…';

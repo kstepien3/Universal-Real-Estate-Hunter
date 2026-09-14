@@ -8,8 +8,14 @@ from sqlalchemy import select
 
 from config import settings
 from src.filters import QualificationEngine
-from src.models.enums import FinishCondition, HeatingType, SewerageType
-from src.models.listing import AIR_FIELDS, GEO_FIELDS, SPATIAL_FIELDS, ListingSchema, apply_if_present
+from src.models.listing import (
+    AIR_FIELDS,
+    GEO_FIELDS,
+    SPATIAL_FIELDS,
+    ListingSchema,
+    apply_if_present,
+    restore_cached_details,
+)
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
 from src.services.config_manager import SearchProfile
 from src.services.discord_notifier import DiscordNotifier
@@ -96,77 +102,16 @@ class ScraperPipeline:
 
         # 1.2 Restore stored detail data when detail was skipped or already cached in DB
         if existing_model:
-            if not listing.raw_description and existing_model.raw_description:
-                listing.raw_description = existing_model.raw_description
-            if listing.finish_condition == FinishCondition.NIEOKRESLONY and existing_model.finish_condition:
-                try:
-                    listing.finish_condition = FinishCondition(existing_model.finish_condition)
-                except ValueError:
-                    pass
-            if listing.sewerage == SewerageType.NIEZNANA and existing_model.sewerage:
-                try:
-                    listing.sewerage = SewerageType(existing_model.sewerage)
-                except ValueError:
-                    pass
-            if listing.heating == HeatingType.NIEZNANE and existing_model.heating:
-                try:
-                    listing.heating = HeatingType(existing_model.heating)
-                except ValueError:
-                    pass
-            if not listing.has_fiber:
-                listing.has_fiber = bool(existing_model.has_fiber)
-            if not listing.has_visualisations:
-                listing.has_visualisations = bool(existing_model.has_visualisations)
-            if not listing.year_built:
-                listing.year_built = existing_model.year_built
-            if not listing.coordinates and existing_model.latitude and existing_model.longitude:
-                listing.coordinates = (existing_model.latitude, existing_model.longitude)
-            if listing.building_type.value == "inny" and existing_model.building_type != "inny":
-                try:
-                    listing.building_type = type(listing.building_type)(existing_model.building_type)
-                except ValueError:
-                    pass
-            if listing.access_road_type.value == "nieznana" and existing_model.access_road_type != "nieznana":
-                try:
-                    listing.access_road_type = type(listing.access_road_type)(existing_model.access_road_type)
-                except ValueError:
-                    pass
-            if listing.market.value == "nieokreślony" and existing_model.market != "nieokreślony":
-                try:
-                    listing.market = type(listing.market)(existing_model.market)
-                except ValueError:
-                    pass
-            if not listing.parcel_id and existing_model.parcel_id:
-                listing.parcel_id = existing_model.parcel_id
-                listing.cadastral_area = existing_model.cadastral_area
-                listing.geoportal_url = existing_model.geoportal_url
-                listing.mpzp_zone = getattr(existing_model, "mpzp_zone", None)
-                listing.mpzp_status = getattr(existing_model, "mpzp_status", None)
-                listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
-                listing.gesut_networks = getattr(existing_model, "gesut_networks_data", None)
-
-            apply_if_present(listing, existing_model, GEO_FIELDS, fill_missing=True)
+            restore_cached_details(listing, existing_model)
 
         # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
         is_exact_coords = True
-        stage1_passed = True
-        if hasattr(self.engine, "precheck_stage1"):
-            try:
-                s1_res = self.engine.precheck_stage1(listing, profile=profile)
-                if isinstance(s1_res, tuple) and len(s1_res) >= 1:
-                    stage1_passed = bool(s1_res[0])
-            except Exception as e:
-                logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
-        else:
-            stage1_attr = getattr(self.engine, "stage1", None)
-            evaluate_fn = getattr(stage1_attr, "evaluate", None)
-            if callable(evaluate_fn):
-                try:
-                    s1_res = evaluate_fn(listing, profile=profile)
-                    if isinstance(s1_res, tuple) and len(s1_res) >= 1:
-                        stage1_passed = bool(s1_res[0])
-                except (ValueError, TypeError, AttributeError) as e:
-                    logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
+        try:
+            s1_res = self.engine.precheck_stage1(listing, profile=profile)
+            stage1_passed = bool(s1_res[0])
+        except Exception as e:
+            logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
+            stage1_passed = True
 
         geo_audit = None
         if stage1_passed:
@@ -341,16 +286,9 @@ class ScraperPipeline:
             if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
                 filter_result.worth_interest = existing_model.worth_interest
 
-        # If a mock or custom engine did not apply spatial findings, ensure spatial fields and scoring are applied
+        # Ensure spatial fields and scoring are applied if not already on the result
         if filter_result.is_qualified and not filter_result.mpzp_zone and listing.mpzp_zone:
-            from src.filters import QualificationEngine
-
-            apply_fn = getattr(self.engine, "apply_spatial_findings", None)
-            if not callable(apply_fn) or hasattr(apply_fn, "_mock_return_value"):
-                apply_fn = QualificationEngine.apply_spatial_findings
-
-            res_spatial = apply_fn(
-                self.engine if apply_fn != QualificationEngine.apply_spatial_findings else QualificationEngine(),
+            res_spatial = self.engine.apply_spatial_findings(
                 listing=listing,
                 score=filter_result.score,
                 pros=filter_result.pros,
@@ -395,15 +333,16 @@ class ScraperPipeline:
 
         # 4. Save or update in database (deferred in batch mode — see _persist_batch,
         # which persists the whole batch with a single commit instead of one per listing)
+        llm_bundle = None
+        if result.get("llm_json") and current_desc_hash:
+            llm_bundle = {
+                "desc_hash": current_desc_hash,
+                "json": result.get("llm_json"),
+                "prompt_version": result.get("llm_prompt_version"),
+                "model": result.get("llm_model"),
+            }
+
         if defer_save:
-            llm_bundle = None
-            if result.get("llm_json") and current_desc_hash:
-                llm_bundle = {
-                    "desc_hash": current_desc_hash,
-                    "json": result.get("llm_json"),
-                    "prompt_version": result.get("llm_prompt_version"),
-                    "model": result.get("llm_model"),
-                }
             result["_deferred_save"] = {
                 "listing": listing,
                 "filter_result": filter_result,
@@ -413,18 +352,8 @@ class ScraperPipeline:
             return result
 
         db_model, is_new, price_changed = await repo.save_or_update(
-            listing, filter_result, is_exact_coords=is_exact_coords
+            listing, filter_result, is_exact_coords=is_exact_coords, llm_cache=llm_bundle
         )
-        if result.get("llm_json") and current_desc_hash:
-            from src.storage.repository import _apply_llm_cache_fields
-
-            _apply_llm_cache_fields(
-                db_model,
-                current_desc_hash,
-                result.get("llm_json"),
-                result.get("llm_prompt_version"),
-                result.get("llm_model"),
-            )
         result["is_new"] = is_new
         result["price_changed"] = price_changed
 
@@ -476,8 +405,6 @@ class ScraperPipeline:
         delivery stays concurrent (gathered); only the notified_at marking joins
         the batch commit.
         """
-        from src.storage.repository import _apply_llm_cache_fields
-
         notify_jobs: list[dict[str, Any]] = []
         async with get_session() as session:
             repo = ListingRepository(session)
@@ -489,13 +416,11 @@ class ScraperPipeline:
                 listing = bundle["listing"]
                 filt = bundle["filter_result"]
                 db_model, is_new, price_changed = await repo.save_or_update(
-                    listing, filt, is_exact_coords=bundle["is_exact_coords"]
+                    listing,
+                    filt,
+                    is_exact_coords=bundle["is_exact_coords"],
+                    llm_cache=bundle.get("llm"),
                 )
-                llm = bundle.get("llm")
-                if llm and llm.get("json") and llm.get("desc_hash"):
-                    _apply_llm_cache_fields(
-                        db_model, llm["desc_hash"], llm["json"], llm.get("prompt_version"), llm.get("model")
-                    )
                 res["is_new"] = is_new
                 res["price_changed"] = price_changed
                 should_notify = _should_notify(

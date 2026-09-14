@@ -49,9 +49,10 @@ def resolve_local_median(
 
 
 def _prop(obj: Any, field: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(field, default)
-    return getattr(obj, field, default)
+    val = obj.get(field, default) if isinstance(obj, dict) else getattr(obj, field, default)
+    if hasattr(val, "value"):
+        return val.value
+    return val if val is not None else default
 
 
 def analyze_negotiation(
