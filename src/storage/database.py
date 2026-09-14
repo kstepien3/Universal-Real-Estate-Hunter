@@ -451,7 +451,8 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
                 (SpatialCacheModel, "spatial_cache", ("created_at", "expires_at")),
             ):
                 if records := _load_records(model_cls, tbl, dt_fields):
-                    session.add_all(records)
+                    for rec in records:
+                        await session.merge(rec)
                     await session.flush()
                     logger.info(f"[Database] Zmigrowano {len(records)} wpisów z '{tbl}' do PostgreSQL.")
 
