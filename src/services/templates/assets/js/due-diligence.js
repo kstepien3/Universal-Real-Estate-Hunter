@@ -576,7 +576,14 @@ function openAiModal(listingId) {
 function closeAiModal(e) {
     if (e && e.target && e.target.id !== 'aiModal') return;
     document.getElementById('aiModal').classList.remove('open');
+    const closedId = currentAiItem ? currentAiItem.id : null;
     currentAiItem = null;
+    if (closedId) {
+        const card = document.getElementById('card-' + closedId);
+        if (card) {
+            card.scrollIntoView({ behavior: 'auto', block: 'nearest' });
+        }
+    }
 }
 
 function renderAirQualityDrawer(item) {
