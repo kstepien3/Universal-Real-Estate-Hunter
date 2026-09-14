@@ -767,9 +767,6 @@
             if (document.getElementById('cfgLocalNumCtx')) {
                 document.getElementById('cfgLocalNumCtx').value = String(activeConfig.local_llm_num_ctx ?? activeConfig.ollama_num_ctx ?? 8192);
             }
-            if (document.getElementById('cfgLocalApiKey')) {
-                document.getElementById('cfgLocalApiKey').value = activeConfig.local_llm_api_key || 'not-needed';
-            }
             if (document.getElementById('cfgCloudTimeout')) {
                 document.getElementById('cfgCloudTimeout').value = activeConfig.cloud_llm_timeout_seconds ?? 30;
             }
@@ -857,7 +854,7 @@
             const localTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || 180;
             const localTemp = parseFloat(document.getElementById('cfgLocalTemperature')?.value || document.getElementById('cfgOllamaTemperature')?.value) || 0.0;
             const localCtx = parseInt(document.getElementById('cfgLocalNumCtx')?.value || document.getElementById('cfgOllamaNumCtx')?.value, 10) || 8192;
-            const localKey = document.getElementById('cfgLocalApiKey')?.value?.trim() || 'not-needed';
+            const localKey = activeConfig.local_llm_api_key || 'not-needed';
             const localPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
             const cloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || 30;
 
@@ -2691,7 +2688,7 @@
             const requestedLocalTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || null;
             const requestedLocalTemp = parseFloat(document.getElementById('cfgLocalTemperature')?.value || document.getElementById('cfgOllamaTemperature')?.value) ?? null;
             const requestedLocalCtx = parseInt(document.getElementById('cfgLocalNumCtx')?.value || document.getElementById('cfgOllamaNumCtx')?.value, 10) || null;
-            const requestedLocalKey = document.getElementById('cfgLocalApiKey')?.value?.trim() || null;
+            const requestedLocalKey = activeConfig?.local_llm_api_key || null;
             const requestedLocalPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
             const requestedCloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || null;
             const requestedOpenRouter = document.getElementById('cfgOpenRouterModel')?.value?.trim() || null;

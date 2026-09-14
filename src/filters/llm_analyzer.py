@@ -230,7 +230,11 @@ class LLMAnalyzer:
         self.local_llm_api_key = (
             local_llm_api_key
             if local_llm_api_key is not None
-            else ((getattr(cfg, "local_llm_api_key", None) if cfg else None) or "not-needed")
+            else (
+                (getattr(cfg, "local_llm_api_key", None) if cfg else None)
+                or os.getenv("LOCAL_LLM_API_KEY")
+                or "not-needed"
+            )
         ).strip()
         self.local_llm_temperature = self.ollama_temperature
         self.local_llm_timeout_seconds = self.ollama_timeout_seconds

@@ -967,7 +967,7 @@
                         </div>
 
                         <details style="margin-top:10px;font-size:12px;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;">
-                            <summary style="cursor:pointer;font-weight:600;color:var(--text-main);">Zaawansowane parametry lokalne (kontekst, temperatura, klucz API)</summary>
+                            <summary style="cursor:pointer;font-weight:600;color:var(--text-main);">Zaawansowane parametry lokalne (kontekst, temperatura)</summary>
                             <div class="config-row2" style="margin-top:8px;">
                                 <div class="config-field">
                                     <label for="cfgLocalNumCtx">Rozmiar kontekstu (num_ctx):</label>
@@ -981,10 +981,6 @@
                                     <label for="cfgLocalTemperature">Temperatura (0 = ścisły determinizm):</label>
                                     <input type="number" id="cfgLocalTemperature" value="0.0" min="0.0" max="1.0" step="0.1" style="width:100%;">
                                 </div>
-                            </div>
-                            <div class="config-field" style="margin-top:8px;">
-                                <label for="cfgLocalApiKey">Klucz API (opcjonalny / w większości silników zbędny):</label>
-                                <input type="text" id="cfgLocalApiKey" placeholder="not-needed" style="width:100%;">
                             </div>
                         </details>
                     </div>
