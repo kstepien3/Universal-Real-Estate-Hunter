@@ -68,6 +68,16 @@ class FilterResult(BaseModel):
     walkability_pka_dist_m: int | None = None
     walkability_pka_name: str | None = None
     power_lines_risk: str | None = None
+    # Air quality & smog intelligence (CAMS + GIOŚ)
+    air_aqi: int | None = None
+    air_aqi_label: str | None = None
+    air_pm25_heating_avg: float | None = None
+    air_pm25_summer_avg: float | None = None
+    air_smog_days: int | None = None
+    air_gios_station: str | None = None
+    air_gios_dist_km: float | None = None
+    air_gios_index: str | None = None
+    air_smog_risk: str | None = None
 
     @property
     def verdict_icon(self) -> str:
@@ -141,6 +151,16 @@ class ListingSchema(BaseModel):
     walkability_pka_dist_m: int | None = None
     walkability_pka_name: str | None = None
     power_lines_risk: str | None = None
+    # Air quality & smog intelligence (CAMS + GIOŚ)
+    air_aqi: int | None = None
+    air_aqi_label: str | None = None
+    air_pm25_heating_avg: float | None = None
+    air_pm25_summer_avg: float | None = None
+    air_smog_days: int | None = None
+    air_gios_station: str | None = None
+    air_gios_dist_km: float | None = None
+    air_gios_index: str | None = None
+    air_smog_risk: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     skip_detail: bool = False

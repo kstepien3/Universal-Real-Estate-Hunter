@@ -4,6 +4,8 @@
         let map = null;
         let markersGroup = null;
         let markersMap = {};
+        let aqiLayer = null;
+        let aqiLayerActive = false;
         let coordCounts = {};
         let activeConfig = null;
         let fetchEtag = null;
@@ -1365,6 +1367,87 @@
                     map.fitBounds(markersGroup.getBounds(), { padding: [30, 30], maxZoom: 15 });
                 } catch (e) {}
             }
+            if (aqiLayerActive) {
+                renderAqiMapLayer(items);
+            }
+        }
+
+        function toggleAqiMapLayer() {
+            if (!map) return;
+            aqiLayerActive = !aqiLayerActive;
+            const btn = document.getElementById('btnToggleAqiLayer');
+            if (btn) {
+                btn.classList.toggle('active', aqiLayerActive);
+            }
+            renderAqiMapLayer(allListings);
+        }
+
+        function renderAqiMapLayer(items = null) {
+            if (!map) return;
+            if (!aqiLayer) {
+                aqiLayer = L.featureGroup();
+            }
+            aqiLayer.clearLayers();
+
+            if (!aqiLayerActive) {
+                if (map.hasLayer(aqiLayer)) {
+                    map.removeLayer(aqiLayer);
+                }
+                return;
+            }
+
+            if (!map.hasLayer(aqiLayer)) {
+                aqiLayer.addTo(map);
+            }
+
+            const targetItems = items || allListings || [];
+            targetItems.forEach(item => {
+                if (!item.latitude || !item.longitude) return;
+                const aqi = item.air_aqi;
+                let color = '#64748b';
+                if (aqi !== null && aqi !== undefined) {
+                    if (aqi <= 20) color = '#22c55e';
+                    else if (aqi <= 40) color = '#84cc16';
+                    else if (aqi <= 60) color = '#eab308';
+                    else if (aqi <= 80) color = '#f97316';
+                    else if (aqi <= 100) color = '#ef4444';
+                    else color = '#7f1d1d';
+                } else if (item.air_smog_risk === 'WYSOKIE') {
+                    color = '#ef4444';
+                } else if (item.air_smog_risk === 'SREDNIE') {
+                    color = '#eab308';
+                } else if (item.air_smog_risk === 'NISKIE') {
+                    color = '#22c55e';
+                }
+
+                const circle = L.circleMarker([item.latitude, item.longitude], {
+                    radius: 12,
+                    fillColor: color,
+                    fillOpacity: 0.82,
+                    color: '#ffffff',
+                    weight: 2,
+                });
+
+                const aqiText = aqi !== null && aqi !== undefined ? `AQI ${aqi}` : 'Brak danych';
+                const labelText = item.air_aqi_label ? ` (${escapeHtml(item.air_aqi_label)})` : '';
+                const winterText = item.air_pm25_heating_avg ? `<br/>PM2.5 zima: <strong>${item.air_pm25_heating_avg} µg/m³</strong>` : '';
+                const smogText = item.air_smog_days ? `<br/>Dni smogowe: <strong>${item.air_smog_days} dni/rok</strong>` : '';
+
+                circle.bindTooltip(`
+                    <div style="font-size:11px;line-height:1.35;">
+                        <strong>${escapeHtml(item.title || 'Oferta')}</strong><br/>
+                        Jakość powietrza: <strong>${aqiText}</strong>${labelText}
+                        ${winterText}
+                        ${smogText}
+                    </div>
+                `, { direction: 'top', offset: [0, -8] });
+
+                circle.on('click', () => {
+                    openAiModal(item.id);
+                });
+
+                aqiLayer.addLayer(circle);
+            });
         }
 
         function updateMapMarkers(items, changedSet, removedSet) {
@@ -1668,6 +1751,20 @@
             const profileBadge = item.profile_name ? `<span class="meta-tag tag-profile">${escapeHtml(item.profile_name)}</span>` : '';
             const ownerBadge = item.is_private_owner === true ? `<span class="meta-tag tag-exact">Prywatne</span>` : (item.is_private_owner === false ? `<span class="meta-tag tag-approx">Biuro / deweloper</span>` : '');
 
+            let aqiTag = '';
+            if (item.air_aqi !== null && item.air_aqi !== undefined) {
+                const aqiVal = item.air_aqi;
+                let aqiCls = 'tag-aqi-good';
+                if (aqiVal > 60 || item.air_smog_risk === 'WYSOKIE') {
+                    aqiCls = 'tag-aqi-danger';
+                } else if (aqiVal > 40 || item.air_smog_risk === 'SREDNIE') {
+                    aqiCls = 'tag-aqi-warn';
+                }
+                const label = item.air_aqi_label || `AQI ${aqiVal}`;
+                const winterNote = item.air_pm25_heating_avg ? ` (PM2.5 zima: ${item.air_pm25_heating_avg} µg/m³)` : '';
+                aqiTag = `<span class="meta-tag tag-aqi ${aqiCls}" title="Jakość powietrza CAMS: AQI ${aqiVal} - ${escapeHtml(label)}${winterNote}">AQI ${aqiVal}</span>`;
+            }
+
             let rejectionHtml = "";
             if (item.filter_reasons && item.filter_reasons.length > 0 && !item.is_qualified) {
                 rejectionHtml = `
@@ -1867,6 +1964,7 @@
                         ${ownerBadge}
                         ${visTag}
                         ${deltaPill}
+                        ${aqiTag}
                         <span class="meta-score">Score <strong>${Math.round(item.qualification_score)}</strong>/150</span>
                     </div>
 
@@ -2479,6 +2577,16 @@
                 const distKm = (item.walkability_pka_dist_m / 1000).toFixed(1);
                 legalRows += `<tr><th>Stacja PKA</th><td class="value">${escapeHtml(item.walkability_pka_name)} (~${distKm} km)</td></tr>`;
             }
+            if (item.air_aqi !== null && item.air_aqi !== undefined || item.air_pm25_heating_avg !== null && item.air_pm25_heating_avg !== undefined) {
+                const aqiVal = (item.air_aqi !== null && item.air_aqi !== undefined) ? `AQI ${item.air_aqi} (${escapeHtml(item.air_aqi_label || '')})` : '';
+                const heatVal = (item.air_pm25_heating_avg !== null && item.air_pm25_heating_avg !== undefined) ? `PM2.5 zima: ${item.air_pm25_heating_avg} µg/m³` : '';
+                const summerVal = (item.air_pm25_summer_avg !== null && item.air_pm25_summer_avg !== undefined) ? `lato: ${item.air_pm25_summer_avg} µg/m³` : '';
+                const giosVal = item.air_gios_station ? `Stacja GIOŚ: ${escapeHtml(item.air_gios_station)}${item.air_gios_dist_km ? ` (${item.air_gios_dist_km} km)` : ''}` : '';
+                const risk = item.air_smog_risk || 'NISKIE';
+                const cls = risk === 'WYSOKIE' ? 'row-danger' : (risk === 'SREDNIE' ? 'row-warn' : 'row-ok');
+                const fullTxt = [aqiVal, [heatVal, summerVal].filter(Boolean).join(' vs '), giosVal].filter(Boolean).join(' · ');
+                legalRows += `<tr class="${cls}"><th>Jakość powietrza (CAMS/GIOŚ)</th><td class="value">${fullTxt}</td></tr>`;
+            }
 
             const legalHtml = legalRows ? `
                 <div class="audit-block">
@@ -2886,6 +2994,8 @@
                 phSection.style.display = 'none';
             }
 
+            renderAirQualityDrawer(item);
+
             document.getElementById('aiModal').classList.add('open');
         }
 
@@ -2893,6 +3003,130 @@
             if (e && e.target && e.target.id !== 'aiModal') return;
             document.getElementById('aiModal').classList.remove('open');
             currentAiItem = null;
+        }
+
+        function renderAirQualityDrawer(item) {
+            const sec = document.getElementById('aiAirQualitySection');
+            const badge = document.getElementById('aiAirQualityBadge');
+            const content = document.getElementById('aiAirQualityContent');
+            if (!sec || !content) return;
+
+            if (!item || (!item.latitude && !item.longitude && item.air_aqi === null && item.air_pm25_heating_avg === null)) {
+                sec.style.display = 'none';
+                return;
+            }
+
+            sec.style.display = 'flex';
+
+            const risk = item.air_smog_risk || 'NIEZNANE';
+            if (risk === 'WYSOKIE') {
+                badge.className = 'meta-tag tag-aqi-danger';
+                badge.innerText = 'Ryzyko smogu: Wysokie';
+            } else if (risk === 'SREDNIE') {
+                badge.className = 'meta-tag tag-aqi-warn';
+                badge.innerText = 'Ryzyko smogu: Umiarkowane';
+            } else if (risk === 'NISKIE') {
+                badge.className = 'meta-tag tag-aqi-good';
+                badge.innerText = 'Ryzyko smogu: Niskie';
+            } else {
+                badge.className = 'meta-tag tag-profile';
+                badge.innerText = 'CAMS + GIOŚ';
+            }
+
+            const aqiVal = (item.air_aqi !== null && item.air_aqi !== undefined) ? `AQI ${item.air_aqi}` : '—';
+            const aqiSub = item.air_aqi_label || 'Indeks CAMS';
+            const heatVal = (item.air_pm25_heating_avg !== null && item.air_pm25_heating_avg !== undefined) ? `${item.air_pm25_heating_avg} µg/m³` : '—';
+            const summerVal = (item.air_pm25_summer_avg !== null && item.air_pm25_summer_avg !== undefined) ? `${item.air_pm25_summer_avg} µg/m³` : '—';
+            const smogDaysVal = (item.air_smog_days !== null && item.air_smog_days !== undefined) ? `${item.air_smog_days} dni/rok` : '—';
+            const giosStation = item.air_gios_station ? escapeHtml(item.air_gios_station) : 'Brak stacji w pobliżu';
+            const giosSub = [
+                item.air_gios_dist_km ? `~${item.air_gios_dist_km} km` : '',
+                item.air_gios_index ? `Stan: ${escapeHtml(item.air_gios_index)}` : ''
+            ].filter(Boolean).join(' · ') || 'Państwowy Monitoring Środowiska';
+
+            content.innerHTML = `
+                <div class="aq-section-wrap">
+                    <div class="aq-tiles-grid">
+                        <div class="aq-tile">
+                            <span class="aq-tile-lbl">Indeks europejski AQI</span>
+                            <span class="aq-tile-val num">${aqiVal}</span>
+                            <span class="aq-tile-sub">${escapeHtml(aqiSub)}</span>
+                        </div>
+                        <div class="aq-tile">
+                            <span class="aq-tile-lbl">Średnia PM2.5 (Zima)</span>
+                            <span class="aq-tile-val num">${heatVal}</span>
+                            <span class="aq-tile-sub">Sezon grzewczy (X–III)</span>
+                        </div>
+                        <div class="aq-tile">
+                            <span class="aq-tile-lbl">Średnia PM2.5 (Lato)</span>
+                            <span class="aq-tile-val num">${summerVal}</span>
+                            <span class="aq-tile-sub">Sezon letni (IV–IX)</span>
+                        </div>
+                        <div class="aq-tile">
+                            <span class="aq-tile-lbl">Dni smogowe</span>
+                            <span class="aq-tile-val num">${smogDaysVal}</span>
+                            <span class="aq-tile-sub">PM2.5 > 25 µg/m³ (WHO)</span>
+                        </div>
+                        <div class="aq-tile">
+                            <span class="aq-tile-lbl">Stacja GIOŚ</span>
+                            <span class="aq-tile-val" style="font-size:12px;" title="${giosStation}">${giosStation}</span>
+                            <span class="aq-tile-sub">${giosSub}</span>
+                        </div>
+                    </div>
+
+                    <div class="aq-chart-container">
+                        <div class="aq-chart-head">
+                            <span class="aq-chart-title">Sezonowy profil stężenia PM2.5 (ostatnie 12 miesięcy)</span>
+                            <span class="aq-chart-unit">µg/m³ (norma WHO: 15 µg/m³)</span>
+                        </div>
+                        <div class="aq-bars-flex" id="aqBarsContainer">
+                            <div style="width:100%;text-align:center;padding:30px 0;color:var(--text-muted);font-size:11px;">Ładowanie profilu 12-miesięcznego…</div>
+                        </div>
+                        <div class="aq-chart-legend">
+                            <div class="aq-legend-item"><span class="aq-legend-swatch" style="background:#22c55e;"></span> Do 15 µg/m³ (Norma WHO)</div>
+                            <div class="aq-legend-item"><span class="aq-legend-swatch" style="background:#f59e0b;"></span> 15–25 µg/m³ (Umiarkowane)</div>
+                            <div class="aq-legend-item"><span class="aq-legend-swatch" style="background:#ef4444;"></span> > 25 µg/m³ (Smog)</div>
+                            <div class="aq-guide-line-hint">Pogrubione etykiety = sezon grzewczy</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            if (item.id) {
+                Transport.airQuality(item.id)
+                    .then(data => {
+                        const barsContainer = document.getElementById('aqBarsContainer');
+                        if (!barsContainer) return;
+                        const monthly = data.monthly_averages || [];
+                        if (!monthly.length) {
+                            barsContainer.innerHTML = '<div style="width:100%;text-align:center;padding:25px 0;color:var(--text-muted);font-size:11px;">Brak szczegółowych danych CAMS dla tej lokalizacji.</div>';
+                            return;
+                        }
+                        const maxVal = Math.max(35, ...monthly.map(m => m.pm2_5 || 0));
+                        barsContainer.innerHTML = monthly.map(m => {
+                            const p25 = m.pm2_5 || 0;
+                            const heightPct = Math.min(100, Math.max(5, Math.round((p25 / maxVal) * 100)));
+                            let color = '#22c55e';
+                            if (p25 > 25.0) color = '#ef4444';
+                            else if (p25 > 15.0) color = '#f59e0b';
+
+                            const winterCls = m.is_heating_season ? 'is-winter' : '';
+                            return `
+                                <div class="aq-bar-group ${winterCls}">
+                                    <span class="aq-bar-val-text">${p25.toFixed(1)}</span>
+                                    <div class="aq-bar-pillar" style="height:${heightPct}%; background:${color};" title="${escapeHtml(m.month_name)}: PM2.5 ${p25.toFixed(1)} µg/m³, PM10 ${(m.pm10 || 0).toFixed(1)} µg/m³, dni smogowe: ${m.smog_days}"></div>
+                                    <span class="aq-bar-month-lbl">${escapeHtml(m.month_name)}</span>
+                                </div>
+                            `;
+                        }).join('');
+                    })
+                    .catch(() => {
+                        const barsContainer = document.getElementById('aqBarsContainer');
+                        if (barsContainer) {
+                            barsContainer.innerHTML = '<div style="width:100%;text-align:center;padding:25px 0;color:var(--text-muted);font-size:11px;">Nie udało się pobrać szczegółowych danych jakości powietrza.</div>';
+                        }
+                    });
+            }
         }
 
         function copyAiQuestions() {

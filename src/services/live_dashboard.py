@@ -101,6 +101,7 @@ class LiveDashboardServer:
         self.app.router.add_get("/assets/{path:.*}", self.handle_assets)
         self.app.router.add_get("/api/listings", self.handle_get_listings)
         self.app.router.add_get("/api/listings/{id}/price-history", self.handle_get_price_history)
+        self.app.router.add_get("/api/listings/{id}/air-quality", self.handle_get_air_quality)
         self.app.router.add_patch("/api/listings/{id}/status", self.handle_update_status)
         self.app.router.add_patch("/api/listings/{id}/notes", self.handle_update_notes)
         self.app.router.add_post("/api/listings/{id}/ai-audit", self.handle_generate_ai_audit)
@@ -358,6 +359,25 @@ class LiveDashboardServer:
             ]
             return web.json_response(data)
 
+    async def handle_get_air_quality(self, request: web.Request) -> web.Response:
+        try:
+            listing_id = int(request.match_info["id"])
+        except (KeyError, ValueError):
+            return web.json_response({"error": "Nieprawidłowy identyfikator oferty"}, status=400)
+
+        async with get_session() as session:
+            repo = ListingRepository(session)
+            item = await repo.get_by_id(listing_id)
+            if not item:
+                return web.json_response({"error": "Listing not found"}, status=404)
+            if not item.latitude or not item.longitude:
+                return web.json_response({"error": "Brak współrzędnych GPS dla tej oferty"}, status=400)
+
+            from src.services.air_quality import air_quality_service
+
+            aq_data = await air_quality_service.get_air_quality_audit(item.latitude, item.longitude)
+            return web.json_response(aq_data)
+
     async def handle_get_listings(self, request: web.Request) -> web.Response:
         prof_filter = request.query.get("profile")
         async with get_session() as session:
@@ -495,6 +515,15 @@ class LiveDashboardServer:
                         "walkability_pka_name": item.walkability_pka_name,
                         "power_lines_risk": item.power_lines_risk,
                         "gesut_networks": item.gesut_networks_data,
+                        "air_aqi": item.air_aqi,
+                        "air_aqi_label": item.air_aqi_label,
+                        "air_pm25_heating_avg": item.air_pm25_heating_avg,
+                        "air_pm25_summer_avg": item.air_pm25_summer_avg,
+                        "air_smog_days": item.air_smog_days,
+                        "air_gios_station": item.air_gios_station,
+                        "air_gios_dist_km": item.air_gios_dist_km,
+                        "air_gios_index": item.air_gios_index,
+                        "air_smog_risk": item.air_smog_risk,
                         "user_status": item.user_status or "NEW",
                         "user_notes": item.user_notes or "",
                         "access_road_type": item.access_road_type,

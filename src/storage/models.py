@@ -92,6 +92,17 @@ class ListingModel(Base):
     walkability_pka_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     power_lines_risk: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
+    # Air quality & smog intelligence (CAMS + GIOŚ)
+    air_aqi: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    air_aqi_label: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    air_pm25_heating_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    air_pm25_summer_avg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    air_smog_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    air_gios_station: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    air_gios_dist_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    air_gios_index: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    air_smog_risk: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
     # CRM User Actions & Status
     user_status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)

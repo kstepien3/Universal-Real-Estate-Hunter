@@ -241,6 +241,42 @@ class QualificationEngine:
             )
             score += 5.0
 
+        # Air quality & smog risk (CAMS + GIOŚ)
+        if (
+            listing.air_smog_risk == "WYSOKIE"
+            or (listing.air_pm25_heating_avg is not None and listing.air_pm25_heating_avg >= 35.0)
+            or (listing.air_smog_days is not None and listing.air_smog_days >= 35)
+        ):
+            avg_str = (
+                f"średnia zima PM2.5: {listing.air_pm25_heating_avg:.1f} µg/m³" if listing.air_pm25_heating_avg else ""
+            )
+            days_str = f", {listing.air_smog_days} dni smogowych w roku" if listing.air_smog_days else ""
+            cons.append(
+                f"🌫️ Wysokie ryzyko smogu w sezonie grzewczym ({avg_str}{days_str}): "
+                "Chroniczne zanieczyszczenie niską emisją w sąsiedztwie"
+            )
+            score -= 15.0
+        elif listing.air_smog_risk == "PODWYŻSZONE" or (
+            listing.air_pm25_heating_avg is not None and listing.air_pm25_heating_avg >= 25.0
+        ):
+            avg_str = (
+                f"średnia zima PM2.5: {listing.air_pm25_heating_avg:.1f} µg/m³" if listing.air_pm25_heating_avg else ""
+            )
+            cons.append(
+                f"⚠️ Podwyższone stężenie pyłów w sezonie grzewczym ({avg_str}): "
+                "Wskazana weryfikacja rodzaju ogrzewania w bezpośrednim sąsiedztwie"
+            )
+            score -= 5.0
+        elif (
+            listing.air_pm25_heating_avg is not None
+            and listing.air_pm25_heating_avg <= 15.0
+            and (listing.air_aqi is None or listing.air_aqi <= 35)
+        ):
+            pros.append(
+                f"🍃 Czyste powietrze przez cały rok (średnia zima PM2.5: {listing.air_pm25_heating_avg:.1f} µg/m³)"
+            )
+            score += 5.0
+
         # Surrounding risks from geo_audit
         if geo_audit:
             risks = geo_audit.get("surrounding_risks", [])
@@ -582,6 +618,15 @@ class QualificationEngine:
                 walkability_pka_dist_m=listing.walkability_pka_dist_m,
                 walkability_pka_name=listing.walkability_pka_name,
                 power_lines_risk=listing.power_lines_risk,
+                air_aqi=listing.air_aqi,
+                air_aqi_label=listing.air_aqi_label,
+                air_pm25_heating_avg=listing.air_pm25_heating_avg,
+                air_pm25_summer_avg=listing.air_pm25_summer_avg,
+                air_smog_days=listing.air_smog_days,
+                air_gios_station=listing.air_gios_station,
+                air_gios_dist_km=listing.air_gios_dist_km,
+                air_gios_index=listing.air_gios_index,
+                air_smog_risk=listing.air_smog_risk,
             )
 
         if not passed_stage2:
@@ -630,6 +675,15 @@ class QualificationEngine:
                 walkability_pka_dist_m=listing.walkability_pka_dist_m,
                 walkability_pka_name=listing.walkability_pka_name,
                 power_lines_risk=listing.power_lines_risk,
+                air_aqi=listing.air_aqi,
+                air_aqi_label=listing.air_aqi_label,
+                air_pm25_heating_avg=listing.air_pm25_heating_avg,
+                air_pm25_summer_avg=listing.air_pm25_summer_avg,
+                air_smog_days=listing.air_smog_days,
+                air_gios_station=listing.air_gios_station,
+                air_gios_dist_km=listing.air_gios_dist_km,
+                air_gios_index=listing.air_gios_index,
+                air_smog_risk=listing.air_smog_risk,
             )
 
         # Step 4: Scoring & Status resolution
@@ -782,6 +836,15 @@ class QualificationEngine:
             walkability_pka_dist_m=listing.walkability_pka_dist_m,
             walkability_pka_name=listing.walkability_pka_name,
             power_lines_risk=listing.power_lines_risk,
+            air_aqi=listing.air_aqi,
+            air_aqi_label=listing.air_aqi_label,
+            air_pm25_heating_avg=listing.air_pm25_heating_avg,
+            air_pm25_summer_avg=listing.air_pm25_summer_avg,
+            air_smog_days=listing.air_smog_days,
+            air_gios_station=listing.air_gios_station,
+            air_gios_dist_km=listing.air_gios_dist_km,
+            air_gios_index=listing.air_gios_index,
+            air_smog_risk=listing.air_smog_risk,
         )
 
 

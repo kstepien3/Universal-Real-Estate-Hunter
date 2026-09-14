@@ -358,6 +358,15 @@ async def _migrate_sqlite_columns(conn) -> None:
                     ("walkability_pka_dist_m", "INTEGER"),
                     ("walkability_pka_name", "VARCHAR(150)"),
                     ("power_lines_risk", "VARCHAR(150)"),
+                    ("air_aqi", "INTEGER"),
+                    ("air_aqi_label", "VARCHAR(50)"),
+                    ("air_pm25_heating_avg", "FLOAT"),
+                    ("air_pm25_summer_avg", "FLOAT"),
+                    ("air_smog_days", "INTEGER"),
+                    ("air_gios_station", "VARCHAR(150)"),
+                    ("air_gios_dist_km", "FLOAT"),
+                    ("air_gios_index", "VARCHAR(50)"),
+                    ("air_smog_risk", "VARCHAR(50)"),
                 ]
                 for col_name, col_type in tier1_cols:
                     if col_name not in existing_cols:

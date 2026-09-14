@@ -220,6 +220,15 @@ class ListingRepository:
                 "walkability_pka_dist_m",
                 "walkability_pka_name",
                 "power_lines_risk",
+                "air_aqi",
+                "air_aqi_label",
+                "air_pm25_heating_avg",
+                "air_pm25_summer_avg",
+                "air_smog_days",
+                "air_gios_station",
+                "air_gios_dist_km",
+                "air_gios_index",
+                "air_smog_risk",
             ):
                 if (val := getattr(listing, f, None)) is not None:
                     setattr(existing, f, val)
@@ -302,6 +311,15 @@ class ListingRepository:
             walkability_pka_dist_m=listing.walkability_pka_dist_m,
             walkability_pka_name=listing.walkability_pka_name,
             power_lines_risk=listing.power_lines_risk,
+            air_aqi=listing.air_aqi,
+            air_aqi_label=listing.air_aqi_label,
+            air_pm25_heating_avg=listing.air_pm25_heating_avg,
+            air_pm25_summer_avg=listing.air_pm25_summer_avg,
+            air_smog_days=listing.air_smog_days,
+            air_gios_station=listing.air_gios_station,
+            air_gios_dist_km=listing.air_gios_dist_km,
+            air_gios_index=listing.air_gios_index,
+            air_smog_risk=listing.air_smog_risk,
             access_road_type=listing.access_road_type.value,
             market=listing.market.value,
             finish_condition=(
