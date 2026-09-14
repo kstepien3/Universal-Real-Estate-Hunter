@@ -739,20 +739,47 @@
                 document.getElementById('cfgLlmAnalysis').checked = !!activeConfig.llm_analysis_enabled;
             }
             if (document.getElementById('cfgLlmProvider')) {
-                const prov = activeConfig.llm_provider || 'auto';
+                let prov = activeConfig.llm_provider || 'auto';
+                if (prov === 'ollama' || prov === 'local_openai') {
+                    prov = 'local';
+                }
                 document.getElementById('cfgLlmProvider').value = prov;
                 if (typeof onLlmProviderChange === 'function') onLlmProviderChange(prov);
             }
-            if (document.getElementById('cfgOllamaModel')) {
-                const olModel = activeConfig.ollama_model || 'llama3.1:8b';
-                document.getElementById('cfgOllamaModel').value = olModel;
-                if (typeof syncOllamaSelectWithInput === 'function') syncOllamaSelectWithInput(olModel);
+            const localPreset = activeConfig.local_llm_preset || 'ollama';
+            if (typeof setLocalEnginePreset === 'function') {
+                setLocalEnginePreset(localPreset, false);
             }
-            if (document.getElementById('cfgOllamaBaseUrl')) {
-                document.getElementById('cfgOllamaBaseUrl').value = activeConfig.ollama_base_url || 'http://localhost:11434';
+            const locModel = activeConfig.local_llm_model || activeConfig.ollama_model || 'qwen2.5:7b';
+            if (document.getElementById('cfgLocalModel')) {
+                document.getElementById('cfgLocalModel').value = locModel;
+                if (typeof syncLocalModelSelectWithInput === 'function') syncLocalModelSelectWithInput(locModel);
             }
-            if (document.getElementById('cfgOllamaTimeout')) {
-                document.getElementById('cfgOllamaTimeout').value = activeConfig.ollama_timeout_seconds ?? 180;
+            if (document.getElementById('cfgLocalBaseUrl')) {
+                let resolvedUrl = activeConfig.local_llm_base_url;
+                if (localPreset === 'ollama') {
+                    if (!resolvedUrl || resolvedUrl.includes(':1234')) {
+                        resolvedUrl = activeConfig.ollama_base_url || 'http://localhost:11434';
+                    }
+                } else if (!resolvedUrl) {
+                    if (localPreset === 'lmstudio') resolvedUrl = 'http://localhost:1234/v1';
+                    else if (localPreset === 'vllm') resolvedUrl = 'http://localhost:8000/v1';
+                    else if (localPreset === 'docker') resolvedUrl = 'http://localhost:8080/v1';
+                    else resolvedUrl = 'http://localhost:11434';
+                }
+                document.getElementById('cfgLocalBaseUrl').value = resolvedUrl;
+            }
+            if (document.getElementById('cfgLocalTimeout')) {
+                document.getElementById('cfgLocalTimeout').value = activeConfig.local_llm_timeout_seconds ?? activeConfig.ollama_timeout_seconds ?? 180;
+            }
+            if (document.getElementById('cfgLocalTemperature')) {
+                document.getElementById('cfgLocalTemperature').value = activeConfig.local_llm_temperature ?? activeConfig.ollama_temperature ?? 0.0;
+            }
+            if (document.getElementById('cfgLocalNumCtx')) {
+                document.getElementById('cfgLocalNumCtx').value = String(activeConfig.local_llm_num_ctx ?? activeConfig.ollama_num_ctx ?? 8192);
+            }
+            if (document.getElementById('cfgCloudTimeout')) {
+                document.getElementById('cfgCloudTimeout').value = activeConfig.cloud_llm_timeout_seconds ?? 30;
             }
             if (document.getElementById('cfgOpenRouterModel')) {
                 document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
@@ -833,6 +860,15 @@
                 pcc_exempt_first_home: !!document.getElementById('cfgCapexPccExempt')?.checked
             };
 
+            const localBaseUrl = document.getElementById('cfgLocalBaseUrl')?.value?.trim() || document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || 'http://localhost:11434';
+            const localModel = document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b';
+            const localTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || 180;
+            const localTemp = parseFloat(document.getElementById('cfgLocalTemperature')?.value || document.getElementById('cfgOllamaTemperature')?.value) || 0.0;
+            const localCtx = parseInt(document.getElementById('cfgLocalNumCtx')?.value || document.getElementById('cfgOllamaNumCtx')?.value, 10) || 8192;
+            const localKey = activeConfig.local_llm_api_key || 'not-needed';
+            const localPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
+            const cloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || 30;
+
             const payload = {
                 profiles: allProfiles,
                 scrapers: scrapersPayload,
@@ -840,9 +876,19 @@
                 capex: capexPayload,
                 llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
                 llm_provider: document.getElementById('cfgLlmProvider')?.value || 'auto',
-                ollama_model: document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b',
-                ollama_base_url: document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || 'http://localhost:11434',
-                ollama_timeout_seconds: parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || 180,
+                local_llm_preset: localPreset,
+                local_llm_base_url: localBaseUrl,
+                local_llm_model: localModel,
+                local_llm_api_key: localKey,
+                local_llm_timeout_seconds: localTimeout,
+                local_llm_temperature: localTemp,
+                local_llm_num_ctx: localCtx,
+                cloud_llm_timeout_seconds: cloudTimeout,
+                ollama_model: localModel,
+                ollama_base_url: localBaseUrl,
+                ollama_timeout_seconds: localTimeout,
+                ollama_temperature: localTemp,
+                ollama_num_ctx: localCtx,
                 openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro'
             };
 
@@ -1747,7 +1793,13 @@
             const aiBadge = hasAiAudit
                 ? `<span class="card-badge badge-ai" title="Oferta posiada analizę AI — raport w szczegółach oferty">AI</span>`
                 : '';
-            if (item.is_new_cycle) {
+            if (item.relist_count && item.relist_count > 0) {
+                deltaBadge = `<span class="card-badge badge-updated" style="background: rgba(239, 68, 68, 0.9); color: #fff;" title="Wykryto powrót oferty na rynek (${item.relist_count}x re-listing)">🔁 Re-list (${item.relist_count}x)</span>`;
+                deltaPill = `<span class="meta-tag tag-profile" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">Re-list ${item.relist_count}x</span>`;
+            } else if (item.listing_status === 'DELISTED') {
+                deltaBadge = `<span class="card-badge badge-checked" style="background: rgba(148, 163, 184, 0.5); color: #e2e8f0;">Wycofana</span>`;
+                deltaPill = `<span class="meta-tag tag-profile">Wycofana</span>`;
+            } else if (item.is_new_cycle) {
                 deltaBadge = `<span class="card-badge badge-new">Nowa</span>`;
                 deltaPill = `<span class="meta-tag tag-exact">Nowa</span>`;
             } else if (item.price_drop_amount && item.price_drop_amount > 0) {
@@ -2126,17 +2178,6 @@
         // Scraping state & monitoring
         // ========================
         let scrapePollTimer = null;
-
-        function copyParcelCadastre(listingId) {
-            const item = (typeof listingId === 'object' && listingId !== null)
-                ? listingId
-                : (allListings.find(i => i.id === listingId) || currentAiItem);
-            if (!item || !item.parcel_id) return;
-            navigator.clipboard.writeText(item.parcel_id).then(() => {
-                showToast(`Skopiowano identyfikator działki: ${item.parcel_id}`);
-            }).catch(() => {});
-        }
-
         let currentLogFilter = 'all';
         let lastScrapeStatus = null;
 
@@ -2488,748 +2529,6 @@
         }
 
         // ========================
-        // Due Diligence drawer content (land audit)
-        // ========================
-        function renderLandAuditHtml(item) {
-            if (!item) return '';
-            const audit = item.land_audit || {};
-            const tco = audit.tco_audit || null;
-            const commute = audit.commute_audit || null;
-            const risk = audit.risk_shield || null;
-            const gesut = audit.gesut_audit || null;
-            const packet = audit.cadastral_packet || audit.search_packet || {
-                parcel_id: item.parcel_id || '',
-                parcel_short: (item.parcel_id || '').split('.').pop() || '',
-                voivodeship: '',
-                cadastral_area: item.cadastral_area || null
-            };
-
-            // 1. Legal & planning parameters
-            let legalRows = '';
-            if (item.parcel_id) {
-                const areaTxt = item.cadastral_area ? ` (${item.cadastral_area} m²)` : '';
-                legalRows += `
-                    <tr>
-                        <th>Identyfikator działki</th>
-                        <td class="value"><span class="num">${escapeHtml(item.parcel_id)}</span>${areaTxt}
-                            <button type="button" class="copy-inline-btn" onclick="copyParcelCadastre(${item.id})" title="Kopiuj identyfikator do schowka">
-                                ${svgIcon('copy', 10)} Kopiuj
-                            </button>
-                        </td>
-                    </tr>`;
-            }
-            if (packet.voivodeship) {
-                legalRows += `<tr><th>Województwo</th><td class="value">${escapeHtml(packet.voivodeship)}</td></tr>`;
-            }
-            if (item.mpzp_zone) {
-                const isMnp = item.mpzp_status === 'OBOWIĄZUJĄCY';
-                const statusTag = isMnp
-                    ? `<span class="meta-tag tag-exact">Obowiązujący</span>`
-                    : `<span class="meta-tag tag-vis">Wymaga WZ</span>`;
-                legalRows += `<tr${isMnp ? '' : ' class="row-warn"'}><th>MPZP</th><td class="value">${escapeHtml(item.mpzp_zone)} ${statusTag}</td></tr>`;
-            } else {
-                legalRows += `<tr class="row-warn"><th>MPZP</th><td class="value">Brak planu miejscowego (wymaga WZ)</td></tr>`;
-            }
-            if (item.flood_risk_zone) {
-                const isFlood = item.flood_risk_zone === 'ZAGROŻENIE_POWODZIOWE';
-                legalRows += `<tr class="${isFlood ? 'row-danger' : 'row-ok'}"><th>Ryzyko powodziowe</th><td class="value">${isFlood ? 'Zagrożenie powodziowe (ISOK)' : 'Brak zagrożenia (ISOK)'}</td></tr>`;
-            }
-            if (item.landslide_risk) {
-                const isLandslide = item.landslide_risk !== 'BRAK' && item.landslide_risk !== 'NIEWYSTĘPUJE';
-                legalRows += `<tr class="${isLandslide ? 'row-danger' : 'row-ok'}"><th>Osuwiska (SOPO)</th><td class="value">${escapeHtml(item.landslide_risk)}</td></tr>`;
-            }
-            if (item.parcel_front_width_m) {
-                const isNarrow = item.parcel_front_width_m < 16.0;
-                legalRows += `<tr class="${isNarrow ? 'row-warn' : ''}"><th>Front działki</th><td class="value"><span class="num">${item.parcel_front_width_m} m</span> (${item.parcel_shape_type || 'regularna'}${item.parcel_length_m ? `, dł. ~${item.parcel_length_m} m` : ''})</td></tr>`;
-            }
-            if (item.parcel_aspect_ratio || item.parcel_shape_type) {
-                const shape = (item.parcel_shape_type || '').toUpperCase();
-                const ratio = item.parcel_aspect_ratio || 0;
-                const isKiszka = shape.includes('SZNUROWKA') || shape.includes('WĄSKA') || ratio >= 4.0;
-                const shapeDesc = `${item.parcel_shape_type ? escapeHtml(item.parcel_shape_type) : '—'}${item.parcel_aspect_ratio ? ` (proporcje 1:${item.parcel_aspect_ratio})` : ''}`;
-                legalRows += `<tr class="${isKiszka ? 'row-warn' : ''}"><th>Proporcje działki</th><td class="value">${shapeDesc}${isKiszka ? ' — nieustawna „kiszka-działka”, utrudniona zabudowa' : ''}</td></tr>`;
-            }
-            if (item.egib_soil_class) {
-                const soil = String(item.egib_soil_class);
-                const isProtected = /(?:^|[^A-Za-z])(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)(?:$|[^A-Za-z])/i.test(soil);
-                const isIndustrial = /(?:^|[^A-Za-z])(?:Ba|Bi)(?:$|[^A-Za-z])/.test(soil);
-                const cls = (isProtected || isIndustrial) ? 'row-warn' : '';
-                let hint = '';
-                if (isProtected) hint = ' — konieczność i koszt odrolnienia (klasy I–III)';
-                else if (isIndustrial) hint = ' — uciążliwe sąsiedztwo przemysłowe';
-                else if (/^B\b/i.test(soil.trim())) hint = ' — tereny mieszkaniowe';
-                legalRows += `<tr class="${cls}"><th>Klasa gruntu EGiB</th><td class="value">${escapeHtml(soil)}${hint}</td></tr>`;
-            }
-            if (item.egib_building_status) {
-                const st = String(item.egib_building_status).toUpperCase();
-                const cls = st === 'UJAWNIONY' ? 'row-ok' : (st === 'BRAK_W_EWIDENCJI' ? 'row-danger' : 'row-warn');
-                const desc = st === 'UJAWNIONY'
-                    ? 'budynek ujawniony w kartotece budynków (odbiór PINB)'
-                    : (st === 'BRAK_W_EWIDENCJI' ? 'brak w ewidencji — ryzyko samowoli / budowy w toku' : escapeHtml(item.egib_building_status));
-                legalRows += `<tr class="${cls}"><th>Status budynku EGiB</th><td class="value">${desc}</td></tr>`;
-            }
-            if (item.noise_level_db !== null && item.noise_level_db !== undefined || item.noise_zone) {
-                const db = (item.noise_level_db !== null && item.noise_level_db !== undefined) ? `${item.noise_level_db} dB Lden` : '';
-                const zone = item.noise_zone ? escapeHtml(item.noise_zone) : '';
-                const isHigh = (item.noise_level_db !== null && item.noise_level_db !== undefined && item.noise_level_db > 65) || /WYSOKI/i.test(item.noise_zone || '');
-                legalRows += `<tr class="${isHigh ? 'row-danger' : ''}"><th>Hałas GIOŚ</th><td class="value">${[db, zone].filter(Boolean).join(' · ') || '—'} (mapy akustyczne: drogi / tory / lotnisko)</td></tr>`;
-            }
-            if (item.nature_protected_zone) {
-                legalRows += `<tr class="row-warn"><th>Obszary chronione GDOŚ</th><td class="value">${escapeHtml(item.nature_protected_zone)} (Natura 2000 / park krajobrazowy — ograniczenia)</td></tr>`;
-            }
-            if (item.monument_zone) {
-                legalRows += `<tr class="row-danger"><th>Strefa konserwatorska NID</th><td class="value">${escapeHtml(item.monument_zone)} (restrykcje WKZ przy remontach)</td></tr>`;
-            }
-            if (item.cemetery_buffer_zone) {
-                const cz = String(item.cemetery_buffer_zone);
-                const cls = cz === '<50m' ? 'row-danger' : (cz === '50-150m' ? 'row-warn' : '');
-                const desc = cz === '<50m' ? 'ograniczenia sanitarne 50 m (zakaz zabudowy/okien)' : (cz === '50-150m' ? 'ograniczenia sanitarne 50–150 m (ujęcie wody)' : escapeHtml(cz));
-                legalRows += `<tr class="${cls}"><th>Strefa cmentarza</th><td class="value">${desc}</td></tr>`;
-            }
-            if (item.terrain_slope_pct !== null && item.terrain_slope_pct !== undefined) {
-                const isSteep = item.terrain_slope_pct > 8.0;
-                legalRows += `<tr class="${isSteep ? 'row-warn' : ''}"><th>Nachylenie terenu (NMT)</th><td class="value"><span class="num">${item.terrain_slope_pct}%</span> (ekspozycja ${escapeHtml(item.terrain_aspect || 'płaska')})</td></tr>`;
-            }
-            if (item.broadband_status) {
-                const isFtth = item.broadband_status === 'ŚWIATŁOWÓD_AKTYWNY';
-                const isNone = item.broadband_status === 'BRAK_ZASIĘGU';
-                const cls = isFtth ? 'row-ok' : (isNone ? 'row-warn' : '');
-                legalRows += `<tr class="${cls}"><th>Światłowód (SIDUSIS)</th><td class="value">${escapeHtml(item.broadband_status)}${item.broadband_details ? ` — ${escapeHtml(item.broadband_details)}` : ''}</td></tr>`;
-            }
-            if (item.power_lines_risk) {
-                const isHv = /(LINIA|400KV|220KV|110KV|WN)/i.test(String(item.power_lines_risk));
-                legalRows += `<tr class="${isHv ? 'row-danger' : 'row-ok'}"><th>Linie wysokiego napięcia</th><td class="value">${escapeHtml(item.power_lines_risk)}</td></tr>`;
-            }
-            if (item.walkability_pka_name) {
-                const distKm = (item.walkability_pka_dist_m / 1000).toFixed(1);
-                legalRows += `<tr><th>Stacja PKA</th><td class="value">${escapeHtml(item.walkability_pka_name)} (~${distKm} km)</td></tr>`;
-            }
-            if (item.air_aqi !== null && item.air_aqi !== undefined || item.air_pm25_heating_avg !== null && item.air_pm25_heating_avg !== undefined) {
-                const aqiVal = (item.air_aqi !== null && item.air_aqi !== undefined) ? `AQI ${item.air_aqi} (${escapeHtml(item.air_aqi_label || '')})` : '';
-                const heatVal = (item.air_pm25_heating_avg !== null && item.air_pm25_heating_avg !== undefined) ? `PM2.5 zima: ${item.air_pm25_heating_avg} µg/m³` : '';
-                const summerVal = (item.air_pm25_summer_avg !== null && item.air_pm25_summer_avg !== undefined) ? `lato: ${item.air_pm25_summer_avg} µg/m³` : '';
-                const giosVal = item.air_gios_station ? `Stacja GIOŚ: ${escapeHtml(item.air_gios_station)}${item.air_gios_dist_km ? ` (${item.air_gios_dist_km} km)` : ''}` : '';
-                const risk = item.air_smog_risk || 'NISKIE';
-                const cls = risk === 'WYSOKIE' ? 'row-danger' : (risk === 'SREDNIE' ? 'row-warn' : 'row-ok');
-                const fullTxt = [aqiVal, [heatVal, summerVal].filter(Boolean).join(' vs '), giosVal].filter(Boolean).join(' · ');
-                legalRows += `<tr class="${cls}"><th>Jakość powietrza (CAMS/GIOŚ)</th><td class="value">${fullTxt}</td></tr>`;
-            }
-
-            const legalHtml = legalRows ? `
-                <div class="audit-block">
-                    <div class="audit-block-head">
-                        <div class="audit-block-title">Parametry prawne i planistyczne</div>
-                    </div>
-                    <table class="dd-table">${legalRows}</table>
-                </div>
-            ` : '';
-
-            // 2. CAPEX (TCO) as clean financial table
-            let tcoHtml = '';
-            if (tco) {
-                const breakdownRows = (tco.breakdown || []).map(b => `
-                    <tr>
-                        <td><strong>${escapeHtml(b.item)}</strong></td>
-                        <td class="amount">${formatPrice(b.amount)}</td>
-                        <td class="note">${escapeHtml(b.desc)}</td>
-                    </tr>
-                `).join('');
-
-                let negoNoteHtml = '';
-                if (tco && tco.hidden_costs_total !== undefined && tco.hidden_costs_total !== null) {
-                    const finCost = (typeof tco.finishing_cost === 'number') ? tco.finishing_cost : 0;
-                    const txCost = (typeof tco.transaction_costs === 'number')
-                        ? tco.transaction_costs
-                        : Math.max(0, tco.hidden_costs_total - finCost);
-                    if (finCost > 0) {
-                        negoNoteHtml = `
-                            <strong>Czynniki korygujące wycenę:</strong>
-                            wykończenie wnętrz <strong class="num">+${formatPrice(finCost)}</strong>,
-                            koszty transakcyjne (PCC, notariusz, prowizja) <strong class="num">+${formatPrice(txCost)}</strong>
-                            — łącznie <strong class="num">+${formatPrice(tco.hidden_costs_total)}</strong> (+${tco.hidden_costs_pct}% ceny ofertowej).
-                            Dane te stanowią podstawę argumentacji cenowej w negocjacjach.`;
-                    } else {
-                        negoNoteHtml = `
-                            <strong>Brak nakładów na wykończenie</strong> (stan do zamieszkania) — koszty wejścia to wyłącznie
-                            koszty transakcyjne (PCC, notariusz, prowizja): <strong class="num">+${formatPrice(txCost)}</strong>
-                            (+${tco.hidden_costs_pct}% ceny ofertowej).
-                            Dane te stanowią podstawę argumentacji cenowej w negocjacjach.`;
-                    }
-                }
-
-                tcoHtml = `
-                    <div class="audit-block">
-                        <div class="audit-block-head">
-                            <div class="audit-block-title">Struktura kosztów całkowitych (CAPEX)</div>
-                            <span class="audit-verdict-badge ${getSeverityBadgeClass(tco.severity)}">${escapeHtml(tco.verdict)}</span>
-                        </div>
-                        <table class="capex-table">
-                            <thead>
-                                <tr><th>Pozycja kosztowa</th><th>Szacunek</th><th>Podstawa</th></tr>
-                            </thead>
-                            <tbody>
-                                ${breakdownRows}
-                                <tr class="total">
-                                    <td>Suma nakładów kapitałowych</td>
-                                    <td class="amount">${formatPrice(tco.total_acquisition_cost)}</td>
-                                    <td class="note">Koszt zakupu + podatki + opłaty + adaptacja</td>
-                                </tr>
-                            </tbody>
-                        </table>
-                        <div class="nego-note">${negoNoteHtml}</div>
-                    </div>
-                `;
-            }
-
-            // 3. Commute
-            let commuteHtml = '';
-            if (commute) {
-                const commuteFindings = (commute.findings || []).map(f => `
-                    <div class="audit-finding-item">
-                        <span class="audit-dot d-${f.severity === 'danger' ? 'danger' : (f.severity === 'warning' ? 'warning' : (f.severity === 'success' ? 'success' : 'info'))}"></span>
-                        <div class="audit-finding-body">
-                            <div class="audit-finding-title">${f.badge ? `<span class="audit-finding-badge">${escapeHtml(f.badge)}</span>` : ''}${escapeHtml(f.title)}</div>
-                            <div class="audit-finding-desc">${escapeHtml(f.desc)}</div>
-                        </div>
-                    </div>
-                `).join('');
-
-                commuteHtml = `
-                    <div class="audit-block">
-                        <div class="audit-block-head">
-                            <div class="audit-block-title">Dostępność komunikacyjna</div>
-                            <span class="audit-verdict-badge ${getSeverityBadgeClass(commute.severity)}">${escapeHtml(commute.verdict)}</span>
-                        </div>
-                        <div class="audit-finding-list">${commuteFindings}</div>
-                        <div class="audit-actions">
-                            ${(item.latitude && item.longitude) ? `
-                            <a href="https://www.google.com/maps/dir/?api=1&destination=${item.latitude},${item.longitude}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Wyznacz trasę dojazdu w Google Maps">
-                                ${svgIcon('map-pin')} Nawiguj w Google Maps
-                            </a>` : ''}
-                            ${geoUrlOf(item) ? `
-                            <a href="${escapeHtml(geoUrlOf(item))}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Pokaż w Geoportalu">
-                                ${svgIcon('external')} Geoportal
-                            </a>` : ''}
-                        </div>
-                    </div>
-                `;
-            }
-
-            // 4. Legal & planning risk shield
-            let riskHtml = '';
-            if (risk) {
-                const riskFindings = (risk.findings || []).map(f => `
-                    <div class="audit-finding-item">
-                        <span class="audit-dot d-${f.severity === 'danger' ? 'danger' : (f.severity === 'warning' ? 'warning' : (f.severity === 'success' ? 'success' : 'info'))}"></span>
-                        <div class="audit-finding-body">
-                            <div class="audit-finding-title">${f.badge ? `<span class="audit-finding-badge">${escapeHtml(f.badge)}</span>` : ''}${escapeHtml(f.title)}</div>
-                            <div class="audit-finding-desc">${escapeHtml(f.desc)}</div>
-                        </div>
-                    </div>
-                `).join('');
-
-                riskHtml = `
-                    <div class="audit-block">
-                        <div class="audit-block-head">
-                            <div class="audit-block-title">Ryzyka prawne i planistyczne</div>
-                            <span class="audit-verdict-badge ${getSeverityBadgeClass(risk.severity)}">${escapeHtml(risk.verdict)}</span>
-                        </div>
-                        <div class="audit-finding-list">${riskFindings}</div>
-                        <div class="audit-actions">
-                            ${item.parcel_id ? `
-                            <button type="button" class="audit-copy-btn" onclick="copyParcelCadastre(${item.id})" title="Skopiuj identyfikator działki katastralnej">
-                                ${svgIcon('copy', 11)} Kopiuj ID działki (${escapeHtml(packet.parcel_short || item.parcel_id)})
-                            </button>` : ''}
-                            ${geoUrlOf(item) ? `
-                            <a href="${escapeHtml(geoUrlOf(item))}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz ewidencję gruntów EGiB">
-                                ${svgIcon('external')} Ewidencja gruntów (EGiB)
-                            </a>` : ''}
-                        </div>
-                    </div>
-                `;
-            }
-
-            // 5. GESUT
-            let gesutHtml = '';
-            if (gesut) {
-                const gesutFindings = (gesut.findings || []).map(f => `
-                    <div class="audit-finding-item">
-                        <span class="audit-dot d-${f.severity === 'danger' ? 'danger' : (f.severity === 'warning' ? 'warning' : (f.severity === 'success' ? 'success' : 'info'))}"></span>
-                        <div class="audit-finding-body">
-                            <div class="audit-finding-title">${f.badge ? `<span class="audit-finding-badge">${escapeHtml(f.badge)}</span>` : ''}${escapeHtml(f.title)}</div>
-                            <div class="audit-finding-desc">${escapeHtml(f.desc)}</div>
-                        </div>
-                    </div>
-                `).join('');
-
-                const gesutUrl = item.gesut_url || geoUrlOf(item);
-                const gesutSource = gesut.source
-                    ? `<div class="gesut-source"><span class="audit-dot d-info"></span>${escapeHtml(gesut.source)}</div>`
-                    : '';
-
-                gesutHtml = `
-                    <div class="audit-block">
-                        <div class="audit-block-head">
-                            <div class="audit-block-title">Uzbrojenie terenu (GESUT)</div>
-                            <span class="audit-verdict-badge ${getSeverityBadgeClass(gesut.severity)}">${escapeHtml(gesut.verdict)}</span>
-                        </div>
-                        <div class="audit-finding-list">${gesutFindings}</div>
-                        ${gesutSource}
-                        <div class="audit-actions">
-                            ${gesutUrl ? `
-                            <a href="${escapeHtml(gesutUrl)}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz Geoportal z warstwami uzbrojenia terenu KIUT">
-                                ${svgIcon('external')} Geoportal (uzbrojenie KIUT)
-                            </a>` : ''}
-                            ${geoUrlOf(item) ? `
-                            <a href="${escapeHtml(geoUrlOf(item))}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz ewidencję gruntów EGiB">
-                                ${svgIcon('external')} Ewidencja gruntów (EGiB)
-                            </a>` : ''}
-                        </div>
-                        <div class="gesut-legend-bar">
-                            <span class="gesut-legend-pill"><b>e</b> = prąd</span>
-                            <span class="gesut-legend-pill"><b>g</b> = gaz</span>
-                            <span class="gesut-legend-pill"><b>w</b> = woda</span>
-                            <span class="gesut-legend-pill"><b>k</b> = kanalizacja</span>
-                            <span class="gesut-legend-pill"><b>t</b> = światłowód</span>
-                        </div>
-                    </div>
-                `;
-            }
-
-            return `
-                ${legalHtml}
-                ${tcoHtml}
-                ${commuteHtml}
-                ${riskHtml}
-                ${gesutHtml}
-            `;
-        }
-
-        function geoUrlOf(item) {
-            if (item.geoportal_url) return item.geoportal_url;
-            if (item.latitude && item.longitude) {
-                return `https://mapy.geoportal.gov.pl/imap/Imgp_2.html?locale=pl&gui=new&session=%7B%22actions%22%3A%5B%7B%22name%22%3A%22locatePoint%22%2C%22params%22%3A%7B%22x%22%3A${item.longitude}%2C%22y%22%3A${item.latitude}%2C%22srid%22%3A4326%7D%7D%5D%7D`;
-            }
-            return null;
-        }
-
-        function getSeverityBadgeClass(sev) {
-            if (sev === 'danger') return 'audit-verdict-danger';
-            if (sev === 'warning') return 'audit-verdict-warning';
-            return 'audit-verdict-success';
-        }
-
-        // ========================
-        // Due Diligence drawer
-        // ========================
-        let currentAiItem = null;
-
-        function openAiModal(listingId) {
-            const item = allListings.find(i => i.id === listingId);
-            if (!item) return;
-            currentAiItem = item;
-
-            if (item.user_status === 'NEW') {
-                updateStatus(item.id, 'CHECKED');
-            }
-
-            document.getElementById('aiModalTitle').innerText = item.title || '';
-
-            // Recommendation
-            const verdictSection = document.getElementById('aiVerdictSection');
-            const verdictBadge = document.getElementById('aiVerdictBadge');
-            const verdictContent = document.getElementById('aiVerdictContent');
-            if (item.ai_verdict || item.worth_interest !== null && item.worth_interest !== undefined) {
-                verdictSection.style.display = 'flex';
-                if (item.worth_interest === true) {
-                    verdictBadge.className = 'verdict-badge positive';
-                    verdictBadge.innerHTML = '<span class="verdict-dot"></span>Rekomendacja: Pozytywna (Kwalifikuje się)';
-                } else if (item.worth_interest === false) {
-                    verdictBadge.className = 'verdict-badge negative';
-                    verdictBadge.innerHTML = '<span class="verdict-dot"></span>Rekomendacja: Negatywna (Do odrzucenia)';
-                } else {
-                    verdictBadge.className = 'verdict-badge unknown';
-                    verdictBadge.innerHTML = '<span class="verdict-dot"></span>Rekomendacja: Wymaga weryfikacji';
-                }
-                verdictContent.innerText = item.ai_verdict || 'Brak uzasadnienia rekomendacji.';
-            } else {
-                verdictSection.style.display = 'none';
-            }
-
-            // Update AI audit button state
-            const btnAiAudit = document.getElementById('btnGenerateAiAudit');
-            if (btnAiAudit) {
-                btnAiAudit.innerText = item.ai_summary ? '🔄 Odśwież raport AI' : '🤖 Generuj raport AI';
-                btnAiAudit.disabled = false;
-            }
-
-            // Synthesis
-            const summaryEl = document.getElementById('aiSummaryContent');
-            if (item.ai_summary) {
-                summaryEl.innerText = item.ai_summary;
-            } else {
-                summaryEl.innerHTML = `
-                    <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-md);border:1px dashed var(--border);">
-                        <span style="color:var(--text-muted);font-size:var(--font-size-xs);">Oferta nie posiada jeszcze wygenerowanego raportu AI.</span>
-                        <button class="btn btn-sm btn-ai-audit" style="align-self:flex-start;" onclick="triggerAiAuditForCurrentItem()">
-                            🤖 Generuj raport AI teraz
-                        </button>
-                    </div>
-                `;
-            }
-
-            // Spatial / financial / legal audit
-            const spatialSection = document.getElementById('aiSpatialSection');
-            const spatialContent = document.getElementById('aiSpatialContent');
-            if (item.parcel_id || item.mpzp_zone || item.flood_risk_zone || item.geoportal_url || (item.latitude && item.longitude) || item.land_audit) {
-                spatialSection.style.display = 'flex';
-                spatialContent.innerHTML = renderLandAuditHtml(item);
-            } else {
-                spatialSection.style.display = 'none';
-            }
-
-            // Contact
-            const contactSection = document.getElementById('aiContactSection');
-            if (item.contact_phone || item.contact_person) {
-                contactSection.style.display = 'flex';
-                const phoneEl = document.getElementById('aiContactPhone');
-                const personEl = document.getElementById('aiContactPerson');
-                if (item.contact_phone) {
-                    const cleanPhone = item.contact_phone.replace(/[\s-]/g, '');
-                    phoneEl.href = 'tel:' + cleanPhone;
-                    phoneEl.innerText = item.contact_phone;
-                } else {
-                    phoneEl.href = '';
-                    phoneEl.innerText = '';
-                }
-                personEl.innerText = item.contact_person || '';
-            } else {
-                contactSection.style.display = 'none';
-            }
-
-            // Questions
-            const qList = document.getElementById('aiQuestionsList');
-            const questions = item.ai_questions || [];
-            if (questions.length > 0) {
-                qList.innerHTML = questions.map(q => `<li>${escapeHtml(q)}</li>`).join('');
-            } else {
-                qList.innerHTML = '<li class="no-data">Brak pytań — uruchom synchronizację z analizą LLM.</li>';
-            }
-
-            // CAPEX renders once, inside the Due Diligence audit block (renderLandAuditHtml).
-
-            // Price adjustment factors
-            const negSection = document.getElementById('aiNegotiationSection');
-            const negContent = document.getElementById('aiNegotiationContent');
-            const btnCopyNeg = document.getElementById('btnCopyNegArgs');
-
-            const leverage = item.negotiation_leverage || 'ŚREDNIA';
-            const levMeta = {
-                'WYSOKA': { cls: 'positive', label: 'Wysoka' },
-                'ŚREDNIA': { cls: 'unknown', label: 'Średnia' },
-                'NISKA': { cls: 'negative', label: 'Niska' }
-            };
-            const lev = levMeta[leverage] || levMeta['ŚREDNIA'];
-
-            const medM2 = item.market_median_m2 ? Math.round(item.market_median_m2).toLocaleString('pl-PL') + ' zł/m²' : 'Brak danych';
-            const devText = (item.price_deviation_pct !== null && item.price_deviation_pct !== undefined)
-                ? (item.price_deviation_pct > 0 ? `+${item.price_deviation_pct}%` : `${item.price_deviation_pct}%`)
-                : '—';
-
-            const fmvText = item.fair_market_value ? Math.round(item.fair_market_value).toLocaleString('pl-PL') + ' zł' : '—';
-            const openOfferText = item.suggested_opening_offer ? Math.round(item.suggested_opening_offer).toLocaleString('pl-PL') + ' zł' : '—';
-
-            let diffText = '';
-            if (item.price && item.suggested_opening_offer && item.price > item.suggested_opening_offer) {
-                const diff = Math.round(item.price - item.suggested_opening_offer);
-                const diffPct = Math.round((diff / item.price) * 100);
-                diffText = `Rabat: −${diff.toLocaleString('pl-PL')} zł (−${diffPct}%)`;
-            }
-
-            const daysOnMkt = item.days_on_market ? `${item.days_on_market} dni` : '—';
-
-            const args = item.negotiation_arguments || [];
-            let argsHtml = '';
-            if (args.length > 0) {
-                argsHtml = `
-                    <div class="nego-args">
-                        <div class="nego-args-head">Argumenty korygujące cenę</div>
-                        <ul>
-                            ${args.map(a => `<li>${escapeHtml(a)}</li>`).join('')}
-                        </ul>
-                    </div>
-                `;
-                if (btnCopyNeg) btnCopyNeg.style.display = 'inline-flex';
-            } else {
-                if (btnCopyNeg) btnCopyNeg.style.display = 'none';
-            }
-
-            negContent.innerHTML = `
-                <div class="nego-grid">
-                    <div class="nego-tile">
-                        <span class="nego-tile-lbl">Pozycja negocjacyjna</span>
-                        <span class="nego-tile-val">${lev.label}</span>
-                        <span class="nego-tile-sub">Na rynku: ${daysOnMkt}</span>
-                    </div>
-                    <div class="nego-tile">
-                        <span class="nego-tile-lbl">Mediana rynku</span>
-                        <span class="nego-tile-val num">${medM2}</span>
-                        <span class="nego-tile-sub">Odchylenie: <strong>${devText}</strong></span>
-                    </div>
-                    <div class="nego-tile">
-                        <span class="nego-tile-lbl">Wartość godziwa (FMV)</span>
-                        <span class="nego-tile-val num">${fmvText}</span>
-                        <span class="nego-tile-sub">Korygowana o stan i wady</span>
-                    </div>
-                    <div class="nego-tile">
-                        <span class="nego-tile-lbl">Oferta otwarcia</span>
-                        <span class="nego-tile-val num" style="color: var(--green-text);">${openOfferText}</span>
-                        <span class="nego-tile-sub">${diffText || 'Zgodna z wyceną'}</span>
-                    </div>
-                </div>
-                ${argsHtml}
-            `;
-
-            // Price corrections history
-            const phSection = document.getElementById('aiPriceDropSection');
-            const phCount = item.price_history_count || 0;
-            if (phCount >= 2) {
-                phSection.style.display = 'flex';
-                const badgeEl = document.getElementById('aiPriceDropBadge');
-                if (item.price_drop_amount) {
-                    badgeEl.innerHTML = `<span class="ph-badge num">Korekta: −${item.price_drop_amount.toLocaleString('pl-PL')} zł (−${item.price_drop_pct}%)</span>`;
-                } else {
-                    badgeEl.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Cena bez zmian od pierwszego wpisu.</span>';
-                }
-                const timeline = document.getElementById('aiPriceTimeline');
-                timeline.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Ładowanie historii cen…</span>';
-                Transport.priceHistory(item.id)
-                    .then(ph => {
-                        if (!Array.isArray(ph) || ph.length < 2) {
-                            phSection.style.display = 'none';
-                            return;
-                        }
-                        timeline.innerHTML = ph.map(h => {
-                            const d = h.date ? new Date(h.date).toLocaleDateString('pl-PL') : '—';
-                            return `<div class="ph-entry"><span>${d}</span><span class="ph-price num">${Math.round(h.price).toLocaleString('pl-PL')} zł</span></div>`;
-                        }).join('');
-                    })
-                    .catch(() => {
-                        timeline.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Nie udało się pobrać historii cen.</span>';
-                    });
-            } else {
-                phSection.style.display = 'none';
-            }
-
-            renderAirQualityDrawer(item);
-
-            document.getElementById('aiModal').classList.add('open');
-        }
-
-        function closeAiModal(e) {
-            if (e && e.target && e.target.id !== 'aiModal') return;
-            document.getElementById('aiModal').classList.remove('open');
-            currentAiItem = null;
-        }
-
-        function renderAirQualityDrawer(item) {
-            const sec = document.getElementById('aiAirQualitySection');
-            const badge = document.getElementById('aiAirQualityBadge');
-            const content = document.getElementById('aiAirQualityContent');
-            if (!sec || !content) return;
-
-            if (!item || (!item.latitude && !item.longitude && item.air_aqi === null && item.air_pm25_heating_avg === null)) {
-                sec.style.display = 'none';
-                return;
-            }
-
-            sec.style.display = 'flex';
-
-            const risk = item.air_smog_risk || 'NIEZNANE';
-            if (risk === 'WYSOKIE') {
-                badge.className = 'meta-tag tag-aqi-danger';
-                badge.innerText = 'Ryzyko smogu: Wysokie';
-            } else if (risk === 'SREDNIE') {
-                badge.className = 'meta-tag tag-aqi-warn';
-                badge.innerText = 'Ryzyko smogu: Umiarkowane';
-            } else if (risk === 'NISKIE') {
-                badge.className = 'meta-tag tag-aqi-good';
-                badge.innerText = 'Ryzyko smogu: Niskie';
-            } else {
-                badge.className = 'meta-tag tag-profile';
-                badge.innerText = 'CAMS + GIOŚ';
-            }
-
-            const aqiVal = (item.air_aqi !== null && item.air_aqi !== undefined) ? `AQI ${item.air_aqi}` : '—';
-            const aqiSub = item.air_aqi_label || 'Indeks CAMS';
-            const heatVal = (item.air_pm25_heating_avg !== null && item.air_pm25_heating_avg !== undefined) ? `${item.air_pm25_heating_avg} µg/m³` : '—';
-            const summerVal = (item.air_pm25_summer_avg !== null && item.air_pm25_summer_avg !== undefined) ? `${item.air_pm25_summer_avg} µg/m³` : '—';
-            const smogDaysVal = (item.air_smog_days !== null && item.air_smog_days !== undefined) ? `${item.air_smog_days} dni/rok` : '—';
-            const giosStation = item.air_gios_station ? escapeHtml(item.air_gios_station) : 'Brak stacji w pobliżu';
-            const giosSub = [
-                item.air_gios_dist_km ? `~${item.air_gios_dist_km} km` : '',
-                item.air_gios_index ? `Stan: ${escapeHtml(item.air_gios_index)}` : ''
-            ].filter(Boolean).join(' · ') || 'Państwowy Monitoring Środowiska';
-
-            content.innerHTML = `
-                <div class="aq-section-wrap">
-                    <div class="aq-tiles-grid">
-                        <div class="aq-tile">
-                            <span class="aq-tile-lbl">Indeks europejski AQI</span>
-                            <span class="aq-tile-val num">${aqiVal}</span>
-                            <span class="aq-tile-sub">${escapeHtml(aqiSub)}</span>
-                        </div>
-                        <div class="aq-tile">
-                            <span class="aq-tile-lbl">Średnia PM2.5 (Zima)</span>
-                            <span class="aq-tile-val num">${heatVal}</span>
-                            <span class="aq-tile-sub">Sezon grzewczy (X–III)</span>
-                        </div>
-                        <div class="aq-tile">
-                            <span class="aq-tile-lbl">Średnia PM2.5 (Lato)</span>
-                            <span class="aq-tile-val num">${summerVal}</span>
-                            <span class="aq-tile-sub">Sezon letni (IV–IX)</span>
-                        </div>
-                        <div class="aq-tile">
-                            <span class="aq-tile-lbl">Dni smogowe</span>
-                            <span class="aq-tile-val num">${smogDaysVal}</span>
-                            <span class="aq-tile-sub">PM2.5 > 25 µg/m³ (WHO)</span>
-                        </div>
-                        <div class="aq-tile">
-                            <span class="aq-tile-lbl">Stacja GIOŚ</span>
-                            <span class="aq-tile-val" style="font-size:12px;" title="${giosStation}">${giosStation}</span>
-                            <span class="aq-tile-sub">${giosSub}</span>
-                        </div>
-                    </div>
-
-                    <div class="aq-chart-container">
-                        <div class="aq-chart-head">
-                            <span class="aq-chart-title">Sezonowy profil stężenia PM2.5 (ostatnie 12 miesięcy)</span>
-                            <span class="aq-chart-unit">µg/m³ (norma WHO: 15 µg/m³)</span>
-                        </div>
-                        <div class="aq-bars-flex" id="aqBarsContainer">
-                            <div style="width:100%;text-align:center;padding:30px 0;color:var(--text-muted);font-size:11px;">Ładowanie profilu 12-miesięcznego…</div>
-                        </div>
-                        <div class="aq-chart-legend">
-                            <div class="aq-legend-item"><span class="aq-legend-swatch" style="background:#22c55e;"></span> Do 15 µg/m³ (Norma WHO)</div>
-                            <div class="aq-legend-item"><span class="aq-legend-swatch" style="background:#f59e0b;"></span> 15–25 µg/m³ (Umiarkowane)</div>
-                            <div class="aq-legend-item"><span class="aq-legend-swatch" style="background:#ef4444;"></span> > 25 µg/m³ (Smog)</div>
-                            <div class="aq-guide-line-hint">Pogrubione etykiety = sezon grzewczy</div>
-                        </div>
-                    </div>
-                </div>
-            `;
-
-            if (item.id) {
-                Transport.airQuality(item.id)
-                    .then(data => {
-                        const barsContainer = document.getElementById('aqBarsContainer');
-                        if (!barsContainer) return;
-                        const monthly = data.monthly_averages || [];
-                        if (!monthly.length) {
-                            barsContainer.innerHTML = '<div style="width:100%;text-align:center;padding:25px 0;color:var(--text-muted);font-size:11px;">Brak szczegółowych danych CAMS dla tej lokalizacji.</div>';
-                            return;
-                        }
-                        const maxVal = Math.max(35, ...monthly.map(m => m.pm2_5 || 0));
-                        barsContainer.innerHTML = monthly.map(m => {
-                            const p25 = m.pm2_5 || 0;
-                            const heightPct = Math.min(100, Math.max(5, Math.round((p25 / maxVal) * 100)));
-                            let color = '#22c55e';
-                            if (p25 > 25.0) color = '#ef4444';
-                            else if (p25 > 15.0) color = '#f59e0b';
-
-                            const winterCls = m.is_heating_season ? 'is-winter' : '';
-                            return `
-                                <div class="aq-bar-group ${winterCls}">
-                                    <span class="aq-bar-val-text">${p25.toFixed(1)}</span>
-                                    <div class="aq-bar-pillar" style="height:${heightPct}%; background:${color};" title="${escapeHtml(m.month_name)}: PM2.5 ${p25.toFixed(1)} µg/m³, PM10 ${(m.pm10 || 0).toFixed(1)} µg/m³, dni smogowe: ${m.smog_days}"></div>
-                                    <span class="aq-bar-month-lbl">${escapeHtml(m.month_name)}</span>
-                                </div>
-                            `;
-                        }).join('');
-                    })
-                    .catch(() => {
-                        const barsContainer = document.getElementById('aqBarsContainer');
-                        if (barsContainer) {
-                            barsContainer.innerHTML = '<div style="width:100%;text-align:center;padding:25px 0;color:var(--text-muted);font-size:11px;">Nie udało się pobrać szczegółowych danych jakości powietrza.</div>';
-                        }
-                    });
-            }
-        }
-
-        function copyAiQuestions() {
-            if (!currentAiItem) return;
-            const qs = currentAiItem.ai_questions || [];
-            if (qs.length === 0) { showToast('Brak pytań do skopiowania.'); return; }
-            const text = qs.map((q, i) => `${i + 1}. ${q}`).join('\n');
-            navigator.clipboard.writeText(text).then(() => showToast('Pytania skopiowane do schowka.'));
-        }
-
-        function copyAiSms() {
-            if (!currentAiItem) return;
-            const item = currentAiItem;
-            const title = item.title || '';
-            const price = item.price ? Math.round(item.price).toLocaleString('pl-PL') + ' zł' : '';
-            const sms = `Dzień dobry,\nJestem zainteresowany/a ofertą: "${title}" (${price}).\nCzy nieruchomość jest nadal dostępna? Kiedy mogę umówić się na oględziny?\nPozdrawiam`;
-            navigator.clipboard.writeText(sms).then(() => showToast('Gotowa wiadomość SMS skopiowana.'));
-        }
-
-        function copyNegotiationArguments() {
-            if (!currentAiItem) return;
-            const args = currentAiItem.negotiation_arguments || [];
-            if (args.length === 0) { showToast('Brak argumentów do skopiowania.'); return; }
-            const heading = `Strategia negocjacyjna dla oferty: ${currentAiItem.title} (${currentAiItem.url})\n` +
-                `Sugerowane otwarcie: ${currentAiItem.suggested_opening_offer ? Math.round(currentAiItem.suggested_opening_offer).toLocaleString('pl-PL') + ' zł' : 'b/d'}\n\n` +
-                `Argumenty korygujące cenę:\n`;
-            const text = heading + args.map((a, i) => `${i + 1}. ${a}`).join('\n');
-            navigator.clipboard.writeText(text).then(() => showToast('Argumenty negocjacyjne skopiowane do schowka.'));
-        }
-
-        async function triggerAiAuditForCurrentItem() {
-            if (!currentAiItem) return;
-            const item = currentAiItem;
-            const btn = document.getElementById('btnGenerateAiAudit');
-            const origHtml = btn ? btn.innerHTML : '';
-            if (btn) {
-                btn.disabled = true;
-                btn.innerHTML = '<span class="spinner-inline"></span> Generowanie…';
-            }
-            const summaryEl = document.getElementById('aiSummaryContent');
-            if (summaryEl) {
-                summaryEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);padding:10px 0;"><span class="spinner-inline"></span> Trwa weryfikacja techniczna i prawna opisu przez AI…</div>';
-            }
-            try {
-                const resp = await fetch(`/api/listings/${item.id}/ai-audit`, { method: 'POST' });
-                if (!resp.ok) {
-                    const err = await resp.json().catch(() => ({}));
-                    throw new Error(err.error || `Błąd serwera (${resp.status})`);
-                }
-                const data = await resp.json();
-                Object.assign(item, data);
-                const inList = allListings.find(i => i.id === item.id);
-                if (inList) Object.assign(inList, data);
-                openAiModal(item.id);
-                showToast('Raport AI został pomyślnie wygenerowany!');
-            } catch (err) {
-                showToast('Błąd generowania raportu AI: ' + err.message);
-                if (summaryEl) {
-                    summaryEl.innerHTML = `
-                        <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-md);border:1px dashed var(--border);">
-                            <span style="color:var(--red-text);font-size:var(--font-size-xs);">Nie udało się wygenerować raportu: ${escapeHtml(err.message)}</span>
-                            <button class="btn btn-sm btn-ai-audit" style="align-self:flex-start;" onclick="triggerAiAuditForCurrentItem()">
-                                🔄 Ponów próbę
-                            </button>
-                        </div>
-                    `;
-                }
-            } finally {
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = item.ai_summary ? '🔄 Odśwież raport AI' : '🤖 Generuj raport AI';
-                }
-            }
-        }
-
-        // ========================
         // LLM Configuration & Diagnostics
         // ========================
         let isTestingLlm = false;
@@ -3238,19 +2537,73 @@
         function onLlmProviderChange(val) {
             const desc = document.getElementById('llmProviderDesc');
             if (!desc) return;
-            if (val === 'ollama') {
-                desc.textContent = 'Wymusza użycie lokalnego serwera Ollama na Twoim komputerze (bezpłatnie, 100% prywatności).';
+            if (val === 'local' || val === 'ollama' || val === 'local_openai') {
+                desc.textContent = 'Wymusza użycie lokalnego silnika AI (Ollama, LM Studio, vLLM, Docker Model Runner) na Twoim komputerze.';
             } else if (val === 'openrouter') {
                 desc.textContent = 'Wymusza użycie chmurowego OpenRouter (wymaga klucza OPENROUTER_API_KEY w .env).';
             } else if (val === 'openai') {
                 desc.textContent = 'Wymusza użycie oficjalnego OpenAI API (wymaga klucza OPENAI_API_KEY w .env).';
             } else {
-                desc.textContent = 'Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalną Ollamę.';
+                desc.textContent = 'Tryb automatyczny najpierw sprawdza chmurę (OpenRouter/OpenAI), a w razie braku — lokalny silnik.';
             }
         }
 
-        function onOllamaSelectChange(val) {
-            const inp = document.getElementById('cfgOllamaModel');
+        function setLocalEnginePreset(preset, updateUrl = true) {
+            const urlInput = document.getElementById('cfgLocalBaseUrl') || document.getElementById('cfgLocalLlmBaseUrl') || document.getElementById('cfgOllamaBaseUrl');
+            const hiddenPreset = document.getElementById('cfgLocalPreset');
+            const badge = document.getElementById('localPresetBadge');
+            if (hiddenPreset) hiddenPreset.value = preset;
+
+            const btns = {
+                ollama: document.getElementById('btnPresetOllama'),
+                lmstudio: document.getElementById('btnPresetLmStudio'),
+                vllm: document.getElementById('btnPresetVllm'),
+                docker: document.getElementById('btnPresetDocker')
+            };
+            Object.keys(btns).forEach(k => {
+                if (btns[k]) {
+                    if (k === preset) {
+                        btns[k].classList.add('btn-primary');
+                        btns[k].style.fontWeight = '600';
+                    } else {
+                        btns[k].classList.remove('btn-primary');
+                        btns[k].style.fontWeight = 'normal';
+                    }
+                }
+            });
+
+            const presetLabels = {
+                ollama: 'Ollama',
+                lmstudio: 'LM Studio',
+                vllm: 'vLLM',
+                docker: 'Docker / LocalAI'
+            };
+            if (badge && presetLabels[preset]) {
+                badge.textContent = 'Preset: ' + presetLabels[preset];
+            }
+
+            if (updateUrl && urlInput) {
+                const currentVal = urlInput.value || '';
+                const usesDockerHost = currentVal.includes('host.docker.internal');
+                const hostPrefix = usesDockerHost ? 'http://host.docker.internal' : 'http://localhost';
+                if (preset === 'ollama') {
+                    urlInput.value = hostPrefix + ':11434';
+                } else if (preset === 'lmstudio') {
+                    urlInput.value = hostPrefix + ':1234/v1';
+                } else if (preset === 'vllm') {
+                    urlInput.value = hostPrefix + ':8000/v1';
+                } else if (preset === 'docker') {
+                    urlInput.value = hostPrefix + ':8080/v1';
+                }
+                showToast('Ustawiono adres silnika: ' + urlInput.value);
+            }
+        }
+        function setLocalLlmPreset(preset) {
+            setLocalEnginePreset(preset, true);
+        }
+
+        function onLocalModelSelectChange(val) {
+            const inp = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
             if (!inp) return;
             if (val !== 'custom') {
                 inp.value = val;
@@ -3259,9 +2612,10 @@
                 inp.select();
             }
         }
+        function onOllamaSelectChange(val) { onLocalModelSelectChange(val); }
 
-        function onOllamaInputCustom(val) {
-            const sel = document.getElementById('cfgOllamaModelSelect');
+        function onLocalModelInputCustom(val) {
+            const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
             const v = (val || '').trim();
             let found = false;
@@ -3276,9 +2630,10 @@
                 sel.value = 'custom';
             }
         }
+        function onOllamaInputCustom(val) { onLocalModelInputCustom(val); }
 
-        function syncOllamaSelectWithInput(modelName) {
-            const sel = document.getElementById('cfgOllamaModelSelect');
+        function syncLocalModelSelectWithInput(modelName) {
+            const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
             const v = (modelName || '').trim();
             let found = false;
@@ -3293,14 +2648,16 @@
                 sel.value = 'custom';
             }
         }
+        function syncOllamaSelectWithInput(modelName) { syncLocalModelSelectWithInput(modelName); }
 
-        function setOllamaModelChip(modelName) {
-            const input = document.getElementById('cfgOllamaModel');
+        function setLocalModelChip(modelName) {
+            const input = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
             if (input) {
                 input.value = modelName;
             }
-            syncOllamaSelectWithInput(modelName);
+            syncLocalModelSelectWithInput(modelName);
         }
+        function setOllamaModelChip(modelName) { setLocalModelChip(modelName); }
 
         function setOpenRouterModelChip(modelName) {
             const input = document.getElementById('cfgOpenRouterModel');
@@ -3309,21 +2666,22 @@
             }
         }
 
-        function updateOllamaSelectOptions(installedModels, currentVal) {
-            const sel = document.getElementById('cfgOllamaModelSelect');
+        function updateLocalModelSelectOptions(installedModels, currentVal) {
+            const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
-            const defaults = ['llama3.1:8b', 'qwen2.5:7b', 'qwen2.5:3b'];
+            const defaults = ['qwen2.5:7b', 'bielik:11b-v2.3-instruct', 'qwen2.5:14b', 'llama3.1:8b', 'llama3.2:3b'];
             const allModels = Array.from(new Set([...(installedModels || []), ...defaults]));
-            const cur = currentVal || document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b';
+            const cur = currentVal || document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b';
             let html = allModels.map(m => {
                 const isInst = (installedModels || []).includes(m);
-                const tag = isInst ? ' (pobrany)' : '';
+                const tag = isInst ? ' (wykryty)' : '';
                 return `<option value="${escapeHtml(m)}">${escapeHtml(m)}${tag}</option>`;
             }).join('');
             html += '<option value="custom">Inny / wpisany ręcznie...</option>';
             sel.innerHTML = html;
-            syncOllamaSelectWithInput(cur);
+            syncLocalModelSelectWithInput(cur);
         }
+        function updateOllamaSelectOptions(installedModels, currentVal) { updateLocalModelSelectOptions(installedModels, currentVal); }
 
         function checkLlmStatusIfEmpty() {
             if (!lastLlmStatusData && !isTestingLlm) {
@@ -3338,24 +2696,39 @@
             const btn = document.getElementById('btnTestLlm');
             const label = document.getElementById('btnTestLlmLabel');
             const container = document.getElementById('llmStatusContainer');
-            const ollamaModelInput = document.getElementById('cfgOllamaModel');
-            const requestedModel = ollamaModelInput ? ollamaModelInput.value.trim() : null;
+            const localModelInput = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
+            const requestedModel = localModelInput ? localModelInput.value.trim() : null;
+            const requestedLocalUrl = document.getElementById('cfgLocalBaseUrl')?.value?.trim() || document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || null;
+            const requestedLocalTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || null;
+            const requestedLocalTemp = parseFloat(document.getElementById('cfgLocalTemperature')?.value || document.getElementById('cfgOllamaTemperature')?.value) ?? null;
+            const requestedLocalCtx = parseInt(document.getElementById('cfgLocalNumCtx')?.value || document.getElementById('cfgOllamaNumCtx')?.value, 10) || null;
+            const requestedLocalKey = activeConfig?.local_llm_api_key || null;
+            const requestedLocalPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
+            const requestedCloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || null;
             const requestedOpenRouter = document.getElementById('cfgOpenRouterModel')?.value?.trim() || null;
             const requestedProvider = document.getElementById('cfgLlmProvider')?.value || null;
-            const requestedOllamaUrl = document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || null;
-            const requestedOllamaTimeout = parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || null;
 
             if (btn) btn.disabled = true;
             if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
             if (container && !isAuto) {
-                container.innerHTML = '<div class="llm-diag-placeholder"><span class="spinner-inline"></span> Sprawdzanie połączeń z OpenRouter, OpenAI oraz Ollama...</div>';
+                container.innerHTML = '<div class="llm-diag-placeholder"><span class="spinner-inline"></span> Sprawdzanie połączeń z chmurą (OpenRouter, OpenAI) oraz silnikiem lokalnym...</div>';
             }
 
             try {
                 const data = await Transport.testLlm({
+                    local_llm_preset: requestedLocalPreset,
+                    local_llm_base_url: requestedLocalUrl,
+                    local_llm_model: requestedModel,
+                    local_llm_api_key: requestedLocalKey,
+                    local_llm_timeout_seconds: requestedLocalTimeout,
+                    local_llm_temperature: requestedLocalTemp,
+                    local_llm_num_ctx: requestedLocalCtx,
+                    cloud_llm_timeout_seconds: requestedCloudTimeout,
                     ollama_model: requestedModel,
-                    ollama_base_url: requestedOllamaUrl,
-                    ollama_timeout_seconds: requestedOllamaTimeout,
+                    ollama_base_url: requestedLocalUrl,
+                    ollama_timeout_seconds: requestedLocalTimeout,
+                    ollama_temperature: requestedLocalTemp,
+                    ollama_num_ctx: requestedLocalCtx,
                     openrouter_model: requestedOpenRouter,
                     llm_provider: requestedProvider
                 });
@@ -3387,10 +2760,15 @@
             const or = p.openrouter || {};
             const oa = p.openai || {};
             const ol = p.ollama || {};
+            const loc = p.local_openai || {};
 
-            // Dynamically refresh the Ollama select with detected installed models
-            if (ol.installed_models) {
-                updateOllamaSelectOptions(ol.installed_models, document.getElementById('cfgOllamaModel')?.value?.trim());
+            // Dynamically refresh the select with detected installed models
+            const detectedModels = [
+                ...(ol.installed_models || []),
+                ...(loc.installed_models || [])
+            ];
+            if (detectedModels.length > 0) {
+                updateLocalModelSelectOptions(detectedModels, document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim());
             }
 
             // Update OpenRouter key notice
@@ -3416,7 +2794,7 @@
                 bannerHtml = `
                     <div class="llm-active-banner status-err">
                         <span>🔴 <strong>Brak gotowego dostawcy AI:</strong> Skonfigurowany dostawca nie odpowiada</span>
-                        <span style="font-size:11px;opacity:0.9;">Sprawdź klucz API lub uruchom Ollama</span>
+                        <span style="font-size:11px;opacity:0.9;">Sprawdź klucz API lub uruchom silnik lokalny</span>
                     </div>
                 `;
             }
@@ -3467,28 +2845,72 @@
                 </div>
             `;
 
+
+
             let installedChips = '';
             if (ol.installed_models && ol.installed_models.length > 0) {
                 installedChips = `
                     <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                        Pobrane modele lokalne (kliknij, aby wybrać do konfiguracji):
+                        Pobrane modele Ollama (kliknij, aby wybrać do konfiguracji):
                         <div class="llm-models-tags">
-                            ${ol.installed_models.map(m => `<span class="llm-model-tag" onclick="setOllamaModelChip('${escapeHtml(m)}')">${escapeHtml(m)}</span>`).join('')}
+                            ${ol.installed_models.map(m => `<span class="llm-model-tag" onclick="setLocalModelChip('${escapeHtml(m)}')">${escapeHtml(m)}</span>`).join('')}
                         </div>
                     </div>
                 `;
             }
 
+            const tps = ol.tokens_per_second;
+            let tpsBadge = '';
+            if (tps) {
+                const estSec = Math.round(300 / tps);
+                if (tps >= 15) {
+                    tpsBadge = `<span class="meta-tag tag-exact" style="margin-left:auto;" title="Akceleracja GPU (~${estSec}s na analizę oferty)">⚡ ${tps} tok/s (GPU)</span>`;
+                } else {
+                    tpsBadge = `<span class="meta-tag tag-vis" style="margin-left:auto;" title="Praca na CPU (~${estSec}s na analizę oferty) — rozważ mniejszy model 3B">⚠️ ${tps} tok/s (CPU)</span>`;
+                }
+            }
+
+            let localChips = '';
+            if (loc.installed_models && loc.installed_models.length > 0) {
+                localChips = `
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                        Wykryte modele na serwerze (kliknij, aby wybrać do konfiguracji):
+                        <div class="llm-models-tags">
+                            ${loc.installed_models.map(m => `<span class="llm-model-tag" onclick="setLocalModelChip('${escapeHtml(m)}')">${escapeHtml(m)}</span>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            const localAiRow = `
+                <div class="llm-provider-row" style="flex-direction:column;align-items:stretch;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div class="llm-provider-title-row" style="flex:1;">
+                            <span class="llm-dot ${getDotClass(loc.status)}"></span>
+                            <span class="llm-provider-name">Lokalny OpenAI (LM Studio / vLLM)</span>
+                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(loc.model || 'auto')})</span>
+                            ${getStatusBadge(loc.status)}
+                        </div>
+                        <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">${escapeHtml(loc.url || 'http://localhost:1234/v1')}</span>
+                    </div>
+                    <div class="llm-provider-msg" style="margin-top:4px;">
+                        ${escapeHtml(loc.message || '')}
+                    </div>
+                    ${localChips}
+                </div>
+            `;
+
             const olRow = `
                 <div class="llm-provider-row" style="flex-direction:column;align-items:stretch;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div class="llm-provider-title-row">
+                        <div class="llm-provider-title-row" style="flex:1;">
                             <span class="llm-dot ${getDotClass(ol.status)}"></span>
                             <span class="llm-provider-name">Ollama (lokalny)</span>
-                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(ol.model || 'llama3.1:8b')})</span>
+                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(ol.model || 'qwen2.5:7b')})</span>
                             ${getStatusBadge(ol.status)}
+                            ${tpsBadge}
                         </div>
-                        <span style="font-size:11px;color:var(--text-muted);">${escapeHtml(ol.url || 'http://localhost:11434')}</span>
+                        <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">${escapeHtml(ol.url || 'http://localhost:11434')}</span>
                     </div>
                     <div class="llm-provider-msg" style="margin-top:4px;">
                         ${escapeHtml(ol.message || '')}
@@ -3497,12 +2919,32 @@
                 </div>
             `;
 
+            const reqProvider = document.getElementById('cfgLlmProvider')?.value || 'auto';
+            const reqPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
+
+            const visibleRows = [];
+            if (reqProvider === 'ollama' || (reqProvider === 'local' && reqPreset === 'ollama')) {
+                visibleRows.push(olRow);
+            } else if (reqProvider === 'local_openai' || (reqProvider === 'local' && reqPreset !== 'ollama')) {
+                visibleRows.push(localAiRow);
+            } else if (reqProvider === 'openrouter') {
+                visibleRows.push(orRow);
+            } else if (reqProvider === 'openai') {
+                visibleRows.push(oaRow);
+            } else {
+                if (or.configured) visibleRows.push(orRow);
+                if (oa.configured) visibleRows.push(oaRow);
+                if (reqPreset === 'ollama') {
+                    visibleRows.push(olRow);
+                } else {
+                    visibleRows.push(localAiRow);
+                }
+            }
+
             container.innerHTML = `
                 ${bannerHtml}
                 <div class="llm-provider-list">
-                    ${orRow}
-                    ${oaRow}
-                    ${olRow}
+                    ${visibleRows.join('')}
                 </div>
             `;
         }

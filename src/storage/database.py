@@ -301,6 +301,11 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("filter_reasons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
     ("pros", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
     ("cons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("physical_fingerprint", "VARCHAR(64)", "VARCHAR(64)"),
+    ("listing_status", "VARCHAR(30) DEFAULT 'ACTIVE'", "VARCHAR(30) DEFAULT 'ACTIVE'"),
+    ("first_seen_at", "DATETIME", "TIMESTAMP WITH TIME ZONE"),
+    ("initial_price", "FLOAT", "DOUBLE PRECISION"),
+    ("relist_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
 ]
 
 
@@ -342,6 +347,7 @@ async def _migrate_database_columns(conn) -> None:
                     ("listings", "notified_at"),
                     ("listings", "created_at"),
                     ("listings", "updated_at"),
+                    ("listings", "first_seen_at"),
                     ("price_history", "recorded_at"),
                     ("geocache", "cached_at"),
                     ("spatial_cache", "created_at"),

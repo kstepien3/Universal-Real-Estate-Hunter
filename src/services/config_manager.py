@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from config import settings
 
@@ -459,8 +459,24 @@ class SearchConfig(BaseModel):
     ollama_model: str = Field(default_factory=lambda: settings.OLLAMA_MODEL)
     ollama_base_url: str = Field(default_factory=lambda: settings.OLLAMA_BASE_URL)
     ollama_timeout_seconds: float = 180.0
+    ollama_temperature: float = 0.0
+    ollama_num_ctx: int = 8192
+    local_llm_preset: str = "ollama"
+    local_llm_base_url: str = Field(default_factory=lambda: settings.OLLAMA_BASE_URL)
+    local_llm_model: str = Field(default_factory=lambda: settings.OLLAMA_MODEL)
+    local_llm_api_key: str = "not-needed"
+    local_llm_temperature: float = 0.0
+    local_llm_num_ctx: int = 8192
+    local_llm_timeout_seconds: float = 120.0
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
+    cloud_llm_timeout_seconds: float = 30.0
     capex: CapexSettings = Field(default_factory=CapexSettings)
+
+    @model_validator(mode="after")
+    def _normalize_local_llm_url(self) -> "SearchConfig":
+        if self.local_llm_preset == "ollama" and (not self.local_llm_base_url or ":1234" in self.local_llm_base_url):
+            self.local_llm_base_url = self.ollama_base_url or settings.OLLAMA_BASE_URL
+        return self
 
     def __getattr__(self, item: str) -> Any:
         # Transparent proxy to active/first profile for backward compatibility
@@ -475,7 +491,17 @@ class SearchConfig(BaseModel):
                 "ollama_model",
                 "ollama_base_url",
                 "ollama_timeout_seconds",
+                "ollama_temperature",
+                "ollama_num_ctx",
+                "local_llm_preset",
+                "local_llm_base_url",
+                "local_llm_model",
+                "local_llm_api_key",
+                "local_llm_temperature",
+                "local_llm_num_ctx",
+                "local_llm_timeout_seconds",
                 "openrouter_model",
+                "cloud_llm_timeout_seconds",
                 "capex",
             )
             and hasattr(self, "profiles")
@@ -646,6 +672,80 @@ class ConfigManager:
                 pass
         if "openrouter_model" in updates and updates["openrouter_model"]:
             current_dict["openrouter_model"] = str(updates["openrouter_model"]).strip()
+        if "cloud_llm_timeout_seconds" in updates and updates["cloud_llm_timeout_seconds"] is not None:
+            try:
+                current_dict["cloud_llm_timeout_seconds"] = max(5.0, float(updates["cloud_llm_timeout_seconds"]))
+            except (TypeError, ValueError):
+                pass
+        if "local_llm_preset" in updates and updates["local_llm_preset"]:
+            current_dict["local_llm_preset"] = str(updates["local_llm_preset"]).strip().lower()
+
+        # Handle local / ollama parameters and keep them synchronized
+        if "ollama_temperature" in updates and updates["ollama_temperature"] is not None:
+            try:
+                temp = max(0.0, min(1.0, float(updates["ollama_temperature"])))
+                current_dict["ollama_temperature"] = temp
+                current_dict["local_llm_temperature"] = temp
+            except (TypeError, ValueError):
+                pass
+        if "local_llm_temperature" in updates and updates["local_llm_temperature"] is not None:
+            try:
+                temp = max(0.0, min(1.0, float(updates["local_llm_temperature"])))
+                current_dict["local_llm_temperature"] = temp
+                current_dict["ollama_temperature"] = temp
+            except (TypeError, ValueError):
+                pass
+
+        if "ollama_num_ctx" in updates and updates["ollama_num_ctx"] is not None:
+            try:
+                ctx = max(1024, int(updates["ollama_num_ctx"]))
+                current_dict["ollama_num_ctx"] = ctx
+                current_dict["local_llm_num_ctx"] = ctx
+            except (TypeError, ValueError):
+                pass
+        if "local_llm_num_ctx" in updates and updates["local_llm_num_ctx"] is not None:
+            try:
+                ctx = max(1024, int(updates["local_llm_num_ctx"]))
+                current_dict["local_llm_num_ctx"] = ctx
+                current_dict["ollama_num_ctx"] = ctx
+            except (TypeError, ValueError):
+                pass
+
+        if "local_llm_base_url" in updates and updates["local_llm_base_url"]:
+            url = str(updates["local_llm_base_url"]).strip().rstrip("/")
+            current_dict["local_llm_base_url"] = url
+            current_dict["ollama_base_url"] = url
+        elif "ollama_base_url" in updates and updates["ollama_base_url"]:
+            url = str(updates["ollama_base_url"]).strip().rstrip("/")
+            current_dict["ollama_base_url"] = url
+            current_dict["local_llm_base_url"] = url
+
+        if "local_llm_model" in updates and updates["local_llm_model"] is not None:
+            m = str(updates["local_llm_model"]).strip()
+            current_dict["local_llm_model"] = m
+            current_dict["ollama_model"] = m
+        elif "ollama_model" in updates and updates["ollama_model"] is not None:
+            m = str(updates["ollama_model"]).strip()
+            current_dict["ollama_model"] = m
+            current_dict["local_llm_model"] = m
+
+        if "local_llm_api_key" in updates and updates["local_llm_api_key"] is not None:
+            current_dict["local_llm_api_key"] = str(updates["local_llm_api_key"]).strip()
+
+        if "local_llm_timeout_seconds" in updates and updates["local_llm_timeout_seconds"] is not None:
+            try:
+                t = max(10.0, float(updates["local_llm_timeout_seconds"]))
+                current_dict["local_llm_timeout_seconds"] = t
+                current_dict["ollama_timeout_seconds"] = t
+            except (TypeError, ValueError):
+                pass
+        elif "ollama_timeout_seconds" in updates and updates["ollama_timeout_seconds"] is not None:
+            try:
+                t = max(10.0, float(updates["ollama_timeout_seconds"]))
+                current_dict["ollama_timeout_seconds"] = t
+                current_dict["local_llm_timeout_seconds"] = t
+            except (TypeError, ValueError):
+                pass
 
         # Support updating first/active profile directly if flat keys were provided
         flat_keys = {
@@ -662,7 +762,17 @@ class ConfigManager:
                 "ollama_model",
                 "ollama_base_url",
                 "ollama_timeout_seconds",
+                "ollama_temperature",
+                "ollama_num_ctx",
+                "local_llm_preset",
+                "local_llm_base_url",
+                "local_llm_model",
+                "local_llm_api_key",
+                "local_llm_temperature",
+                "local_llm_num_ctx",
+                "local_llm_timeout_seconds",
                 "openrouter_model",
+                "cloud_llm_timeout_seconds",
             )
         }
         if flat_keys and current_dict.get("profiles"):

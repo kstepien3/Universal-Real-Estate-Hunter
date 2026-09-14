@@ -904,64 +904,106 @@
                     <div class="config-field" style="margin-top:14px;">
                         <label for="cfgLlmProvider">Aktywny dostawca AI (LLM):</label>
                         <select id="cfgLlmProvider" onchange="onLlmProviderChange(this.value)">
-                            <option value="auto">Automatyczny (OpenRouter ➔ OpenAI ➔ Ollama)</option>
-                            <option value="ollama">Ollama (lokalny na Twoim komputerze)</option>
+                            <option value="auto">Automatyczny (OpenRouter ➔ OpenAI ➔ Silnik lokalny)</option>
+                            <option value="local">Lokalny silnik AI (Ollama / LM Studio / vLLM / Docker)</option>
                             <option value="openrouter">OpenRouter (chmura)</option>
                             <option value="openai">OpenAI (chmura)</option>
                         </select>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="llmProviderDesc">
-                            Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalną Ollamę.
+                            Tryb automatyczny najpierw sprawdza chmurę (OpenRouter/OpenAI), a w razie braku — lokalny silnik.
                         </div>
                     </div>
 
-                    <div class="config-field" style="margin-top:14px;">
+                    <!-- Zunifikowany Lokalny Silnik AI (Ollama / LM Studio / vLLM / Docker) -->
+                    <div class="config-field" id="localAiSection" style="margin-top:14px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                            <label style="margin-bottom:0;">Lokalny silnik AI na Twoim komputerze:</label>
+                            <span id="localPresetBadge" style="font-size:11px;color:var(--text-muted);">Preset: Ollama</span>
+                        </div>
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;" id="localPresetBtns">
+                            <button type="button" class="btn btn-sm" id="btnPresetOllama" onclick="setLocalEnginePreset('ollama')">Ollama (:11434)</button>
+                            <button type="button" class="btn btn-sm" id="btnPresetLmStudio" onclick="setLocalEnginePreset('lmstudio')">LM Studio (:1234)</button>
+                            <button type="button" class="btn btn-sm" id="btnPresetVllm" onclick="setLocalEnginePreset('vllm')">vLLM (:8000)</button>
+                            <button type="button" class="btn btn-sm" id="btnPresetDocker" onclick="setLocalEnginePreset('docker')">Docker / LocalAI (:8080)</button>
+                        </div>
+                        <input type="hidden" id="cfgLocalPreset" value="ollama">
+
                         <div class="config-row2">
                             <div class="config-field">
-                                <label for="cfgOllamaBaseUrl">Adres Ollama (Base URL):</label>
-                                <input type="text" id="cfgOllamaBaseUrl" placeholder="http://localhost:11434" style="width:100%;">
+                                <label for="cfgLocalBaseUrl">Adres serwera (Base URL):</label>
+                                <input type="text" id="cfgLocalBaseUrl" placeholder="http://localhost:11434" style="width:100%;">
                             </div>
                             <div class="config-field">
-                                <label for="cfgOllamaTimeout">Timeout generowania (s):</label>
-                                <input type="number" id="cfgOllamaTimeout" placeholder="180" step="10" min="10" style="width:100%;">
+                                <label for="cfgLocalTimeout">Timeout generowania (s):</label>
+                                <input type="number" id="cfgLocalTimeout" placeholder="180" step="10" min="10" style="width:100%;">
                             </div>
                         </div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;margin-bottom:10px;">
-                            W Dockerze użyj <code>http://host.docker.internal:11434</code>. Większe modele mogą potrzebować dłuższego timeoutu.
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;margin-bottom:10px;" id="localUrlHint">
+                            W Dockerze użyj <code>http://host.docker.internal:...</code>. Większe modele mogą potrzebować dłuższego timeoutu.
                         </div>
-                        <label for="cfgOllamaModelSelect">Model dla lokalnego Ollama:</label>
+
+                        <label for="cfgLocalModelSelect">Model dla silnika lokalnego:</label>
                         <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
-                            <select id="cfgOllamaModelSelect" style="flex:1;" onchange="onOllamaSelectChange(this.value)">
-                                <option value="llama3.1:8b">llama3.1:8b (zalecany, 4.9 GB)</option>
-                                <option value="qwen2.5:7b">qwen2.5:7b (szybki)</option>
-                                <option value="qwen2.5:3b">qwen2.5:3b (bardzo lekki)</option>
+                            <select id="cfgLocalModelSelect" style="flex:1;" onchange="onLocalModelSelectChange(this.value)">
+                                <option value="qwen2.5:7b">qwen2.5:7b (zalecany domyślny, 4.7 GB)</option>
+                                <option value="bielik:11b-v2.3-instruct">bielik:11b-v2.3-instruct (polski ekspert, 6.5 GB)</option>
+                                <option value="qwen2.5:14b">qwen2.5:14b (wysoka precyzja, 9.0 GB)</option>
+                                <option value="llama3.1:8b">llama3.1:8b (uniwersalny, 4.9 GB)</option>
+                                <option value="llama3.2:3b">llama3.2:3b (lekki / tylko CPU, 2.0 GB)</option>
                                 <option value="custom">Inny / wpisany ręcznie...</option>
                             </select>
                         </div>
                         <div class="config-input-chips-group">
-                            <input type="text" id="cfgOllamaModel" placeholder="llama3.1:8b" class="config-chips-input" oninput="onOllamaInputCustom(this.value)">
+                            <input type="text" id="cfgLocalModel" placeholder="qwen2.5:7b" class="config-chips-input" oninput="onLocalModelInputCustom(this.value)">
                             <div class="config-chips-btns">
-                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('llama3.1:8b')">llama3.1:8b</button>
-                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:7b')">qwen2.5:7b</button>
-                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:3b')">qwen2.5:3b</button>
+                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('qwen2.5:7b')">qwen2.5:7b</button>
+                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('bielik:11b-v2.3-instruct')">bielik:11b</button>
+                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('qwen2.5:14b')">qwen2.5:14b</button>
+                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('llama3.2:3b')">llama3.2:3b</button>
                             </div>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                            Wybierz z listy wykrytych modeli lub wpisz dowolny model pobrany przez <code>ollama pull</code>.
+                            Wybierz z listy zainstalowanych modeli lub wpisz nazwę modelu.
                         </div>
+
+                        <details style="margin-top:10px;font-size:12px;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;">
+                            <summary style="cursor:pointer;font-weight:600;color:var(--text-main);">Zaawansowane parametry lokalne (kontekst, temperatura)</summary>
+                            <div class="config-row2" style="margin-top:8px;">
+                                <div class="config-field">
+                                    <label for="cfgLocalNumCtx">Rozmiar kontekstu (num_ctx):</label>
+                                    <select id="cfgLocalNumCtx" style="width:100%;">
+                                        <option value="4096">4096 tokenów (mniejsze zużycie VRAM)</option>
+                                        <option value="8192" selected>8192 tokenów (zalecane domyślne)</option>
+                                        <option value="16384">16384 tokenów (duże opisy / mocne GPU)</option>
+                                    </select>
+                                </div>
+                                <div class="config-field">
+                                    <label for="cfgLocalTemperature">Temperatura (0 = ścisły determinizm):</label>
+                                    <input type="number" id="cfgLocalTemperature" value="0.0" min="0.0" max="1.0" step="0.1" style="width:100%;">
+                                </div>
+                            </div>
+                        </details>
                     </div>
 
+                    <!-- Konfiguracja Chmurowa (OpenRouter / OpenAI) -->
                     <div class="config-field" id="openrouterModelField" style="margin-top:14px;">
-                        <label for="cfgOpenRouterModel">Model dla OpenRouter (chmura):</label>
-                        <div class="config-input-chips-group">
-                            <input type="text" id="cfgOpenRouterModel" placeholder="google/gemini-2.5-flash-lite:nitro" class="config-chips-input">
-                            <div class="config-chips-btns">
-                                <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('google/gemini-2.5-flash-lite:nitro')">gemini-flash-lite</button>
-                                <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('meta-llama/llama-3.3-70b-instruct:free')">llama-3.3-70b:free</button>
-                                <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('deepseek/deepseek-chat')">deepseek-chat</button>
+                        <div class="config-row2">
+                            <div class="config-field">
+                                <label for="cfgOpenRouterModel">Model dla OpenRouter (chmura):</label>
+                                <input type="text" id="cfgOpenRouterModel" placeholder="google/gemini-2.5-flash-lite:nitro" style="width:100%;">
+                            </div>
+                            <div class="config-field">
+                                <label for="cfgCloudTimeout">Timeout dla chmury (s):</label>
+                                <input type="number" id="cfgCloudTimeout" placeholder="30" step="5" min="5" style="width:100%;">
                             </div>
                         </div>
+                        <div class="config-chips-btns" style="margin-top:6px;">
+                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('google/gemini-2.5-flash-lite:nitro')">gemini-flash-lite</button>
+                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('meta-llama/llama-3.3-70b-instruct:free')">llama-3.3-70b:free</button>
+                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('deepseek/deepseek-chat')">deepseek-chat</button>
+                        </div>
                         <div id="openrouterKeyNotice" style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                            Wpisz identyfikator modelu z OpenRouter. Dostępne gdy w .env skonfigurowano OPENROUTER_API_KEY.
+                            Wpisz model z OpenRouter. Dostępne gdy w pliku .env skonfigurowano klucze OPENROUTER_API_KEY lub OPENAI_API_KEY.
                         </div>
                     </div>
 
@@ -986,13 +1028,13 @@
 
                         <div id="llmStatusContainer" class="llm-status-container">
                             <div class="llm-diag-placeholder">
-                                Kliknij „Sprawdź połączenie”, aby przetestować OpenRouter, OpenAI oraz lokalną Ollama.
+                                Kliknij „Sprawdź połączenie”, aby przetestować OpenRouter, OpenAI, lokalny serwer OpenAI (LM Studio/vLLM) oraz Ollama.
                             </div>
                         </div>
                     </div>
 
                     <div class="hint-box" style="margin-top:12px;">
-                        <strong>Łańcuch awaryjny (fallback):</strong> OpenRouter &rarr; OpenAI &rarr; Ollama (lokalnie) &rarr; Reguły regex.<br>
+                        <strong>Łańcuch awaryjny (fallback):</strong> OpenRouter &rarr; OpenAI &rarr; Lokalny OpenAI &rarr; Ollama &rarr; Reguły regex.<br>
                         Oferty z niezmienionym opisem i istniejącą analizą nie są ponownie wysyłane do LLM (oszczędność kosztów).
                     </div>
                 </div>
@@ -1191,5 +1233,6 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
     <script src="/assets/js/transport.js"></script>
     <script src="/assets/js/dashboard.js"></script>
+    <script src="/assets/js/due-diligence.js"></script>
 </body>
 </html>

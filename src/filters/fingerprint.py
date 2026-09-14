@@ -8,8 +8,10 @@ def normalize_text(text: str | None) -> str:
     if not text:
         return ""
     text = text.lower().strip()
-    # Normalize unicode forms
+    text = text.replace("ł", "l")
+    # Normalize unicode forms and strip combining diacritics
     text = unicodedata.normalize("NFKD", text)
+    text = "".join(c for c in text if not unicodedata.combining(c))
     # Remove common prefixes
     text = re.sub(r"\b(ul\.|ulica|al\.|aleja|os\.|osiedle|rejon|okolice|blisko|przy)\b", "", text)
     # Remove non-alphanumeric chars except space
@@ -99,6 +101,46 @@ def estimate_llm_tokens(text: str | None, head: int = 4000, tail: int = 1500) ->
         return 1500  # prompt template + schema overhead
     sliced_len = min(len(text), head + tail + 10)
     return (sliced_len // 4) + 1500
+
+
+def generate_physical_fingerprint(
+    area_home: float,
+    area_plot: float | None = None,
+    rooms: int | None = None,
+    street: str | None = None,
+    district: str | None = None,
+    city: str | None = None,
+    location_raw: str | None = None,
+    title: str | None = None,
+    category: str = "dom",
+) -> str | None:
+    """
+    Generate unique physical property signature independent of price:
+    - Category (dom, mieszkanie, dzialka)
+    - Normalized city token
+    - Street / micro-location fragment
+    - Home area bucket (+/- 2 m² tolerance -> bucket 4 m²)
+    - Plot area bucket (+/- 10 m² tolerance -> bucket 10 m²)
+    - Room count (if known)
+
+    Returns None if location is completely indeterminate to prevent false collisions.
+    """
+    cat_str = str(getattr(category, "value", category) or "dom").lower()
+    city_token = normalize_text(city) if city else ""
+    street_token = extract_street_token(street, district, location_raw, title)
+
+    if street_token == "unknown_area" and not city_token and not district:
+        return None
+
+    home_bucket = int(round(area_home / 4.0) * 4) if area_home > 0 else 0
+    plot_bucket = str(int(round(area_plot / 10.0) * 10)) if area_plot and area_plot > 0 else "noplot"
+
+    room_token = str(rooms) if rooms and rooms > 0 else "0"
+    dist_token = normalize_text(district) if district else ""
+
+    raw_sig = f"{cat_str}|{city_token}|{dist_token}|{street_token}|{home_bucket}|{plot_bucket}|{room_token}"
+    digest = hashlib.sha256(raw_sig.encode("utf-8")).hexdigest()[:16]
+    return f"phys_{digest}"
 
 
 def generate_property_fingerprint(

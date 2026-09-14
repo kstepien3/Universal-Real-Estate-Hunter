@@ -7,7 +7,7 @@ from loguru import logger
 from sqlalchemy import select
 
 from config import settings
-from src.filters import QualificationEngine
+from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.listing import (
     AIR_FIELDS,
     GEO_FIELDS,
@@ -56,6 +56,8 @@ class ScraperPipeline:
         self.discord = discord_notifier or DiscordNotifier()
         self.telegram = telegram_notifier or TelegramNotifier()
         self.llm_analysis_enabled = settings.USE_LLM_ANALYSIS
+        from src.filters import QualificationEngine
+
         self.engine = QualificationEngine(llm_enabled=self.llm_analysis_enabled)
 
     async def process_listing(
@@ -85,7 +87,20 @@ class ScraperPipeline:
         # 1. Look up existing record in database
         existing_model = await repo.get_by_url(listing.url) or await repo.get_by_portal_id(listing.portal, listing.id)
 
-        # 1.1 Check duplicate by fingerprint
+        # 1.1 Compute physical fingerprint & check duplicate / re-listing
+        if not listing.physical_fingerprint:
+            listing.physical_fingerprint = generate_physical_fingerprint(
+                area_home=listing.area_home,
+                area_plot=listing.area_plot,
+                rooms=listing.rooms,
+                street=listing.street,
+                district=listing.district,
+                city=listing.city,
+                location_raw=listing.location_raw,
+                title=listing.title,
+                category=listing.category,
+            )
+
         if listing.property_fingerprint:
             duplicate_model = await repo.find_duplicate_by_fingerprint(listing.property_fingerprint)
             if duplicate_model and duplicate_model.url != listing.url:
@@ -99,6 +114,28 @@ class ScraperPipeline:
                     category="info",
                 )
                 result["is_duplicate_fingerprint"] = True
+
+        if listing.physical_fingerprint and not existing_model:
+            relist_model = await repo.find_relist_by_physical_fingerprint(
+                listing.physical_fingerprint,
+                exclude_url=listing.url,
+            )
+            if relist_model:
+                listing.first_seen_at = relist_model.first_seen_at or relist_model.created_at
+                listing.initial_price = relist_model.initial_price or relist_model.price
+                listing.relist_count = (relist_model.relist_count or 0) + 1
+                listing.listing_status = "RELISTED"
+                logger.info(
+                    f"[Pipeline] 🔁 Wykryto re-listing dla '{listing.title[:40]}' "
+                    f"(pierwotnie ID #{relist_model.id} z {relist_model.portal}, "
+                    f"pierwotna cena {listing.initial_price:,.0f} zł)."
+                )
+                global_tracker.add_log(
+                    f"🔁 [Re-listing] {listing.title[:30]}: powrót #{relist_model.id} ({relist_model.portal}), "
+                    f"pierwotnie {listing.initial_price:,.0f} zł",
+                    level="warning",
+                    category="info",
+                )
 
         # 1.2 Restore stored detail data when detail was skipped or already cached in DB
         if existing_model:
@@ -514,6 +551,8 @@ class ScraperPipeline:
 
         cfg = config_manager.get_config()
         self.llm_analysis_enabled = bool(getattr(cfg, "llm_analysis_enabled", settings.USE_LLM_ANALYSIS))
+        from src.filters import QualificationEngine
+
         self.engine = QualificationEngine(llm_enabled=self.llm_analysis_enabled)
         if self.llm_analysis_enabled:
             logger.info(
@@ -727,6 +766,27 @@ class ScraperPipeline:
                         )
             except Exception as e:
                 logger.debug(f"[Pipeline] Spatial backfill error: {e}")
+
+        # Passive delisting sweep: mark listings not seen on portals for > 7 days as DELISTED
+        if not global_tracker.is_cancelled():
+            try:
+                async with get_session() as session:
+                    delist_repo = ListingRepository(session)
+                    delisted_cnt = await delist_repo.mark_passive_delisted(
+                        inactive_days=7,
+                        profile_id=target_profile,
+                    )
+                    if delisted_cnt > 0:
+                        logger.info(
+                            f"[Pipeline] Pasywnie oznaczono {delisted_cnt} ofert jako wycofane/zakończone (brak na portalu >7 dni)."
+                        )
+                        global_tracker.add_log(
+                            f"📉 [Płynność] Oznaczono {delisted_cnt} nieaktywnych ofert jako wycofane/sprzedane",
+                            level="info",
+                            category="info",
+                        )
+            except Exception as e:
+                logger.debug(f"[Pipeline] Passive delisting check error: {e}")
 
         t_process = time.perf_counter() - t_process_start
         portal_timings = ", ".join(f"{name}={elapsed:.1f}s" for name, elapsed in scrape_portal_times)

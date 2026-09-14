@@ -114,6 +114,14 @@ def restore_cached_details(listing: "ListingSchema", existing_model: Any) -> Non
         listing.mpzp_status = getattr(existing_model, "mpzp_status", None)
         listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
         listing.gesut_networks = getattr(existing_model, "gesut_networks_data", None)
+    if not listing.physical_fingerprint and getattr(existing_model, "physical_fingerprint", None):
+        listing.physical_fingerprint = existing_model.physical_fingerprint
+    if getattr(existing_model, "first_seen_at", None):
+        listing.first_seen_at = existing_model.first_seen_at
+    if getattr(existing_model, "initial_price", None):
+        listing.initial_price = existing_model.initial_price
+    if getattr(existing_model, "relist_count", None):
+        listing.relist_count = existing_model.relist_count
 
     apply_if_present(listing, existing_model, GEO_FIELDS, fill_missing=True)
 
@@ -227,6 +235,11 @@ class ListingSchema(BaseModel):
     main_image_url: str | None = None
     gallery_images: list[str] = Field(default_factory=list)
     property_fingerprint: str | None = None
+    physical_fingerprint: str | None = None
+    listing_status: str = "ACTIVE"
+    first_seen_at: datetime | None = None
+    initial_price: float | None = None
+    relist_count: int = 0
     parcel_id: str | None = None
     cadastral_area: float | None = None
     geoportal_url: str | None = None

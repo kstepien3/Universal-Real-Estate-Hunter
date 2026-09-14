@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from loguru import logger
-from sqlalchemy import delete, desc, or_, select
+from sqlalchemy import delete, desc, or_, select, update
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -113,6 +113,42 @@ class ListingRepository:
         res = await self.session.execute(stmt)
         return res.scalars().first()
 
+    async def find_relist_by_physical_fingerprint(
+        self,
+        physical_fingerprint: str,
+        exclude_url: str | None = None,
+        within_days: int = 365,
+    ) -> ListingModel | None:
+        """Find previous appearances of the same physical property (re-listings / multi-agency)."""
+        cutoff = datetime.now(UTC) - timedelta(days=within_days)
+        conditions = [
+            ListingModel.physical_fingerprint == physical_fingerprint,
+            ListingModel.created_at >= cutoff,
+        ]
+        if exclude_url:
+            conditions.append(ListingModel.url != exclude_url)
+        stmt = select(ListingModel).where(*conditions).order_by(ListingModel.created_at.asc())
+        res = await self.session.execute(stmt)
+        return res.scalars().first()
+
+    async def mark_passive_delisted(
+        self,
+        inactive_days: int = 7,
+        profile_id: str | None = None,
+    ) -> int:
+        """Passively marks listings as DELISTED if not seen on portals within inactive_days."""
+        cutoff = datetime.now(UTC) - timedelta(days=inactive_days)
+        conditions = [
+            ListingModel.listing_status == "ACTIVE",
+            ListingModel.last_scraped_at.isnot(None),
+            ListingModel.last_scraped_at < cutoff,
+        ]
+        if profile_id:
+            conditions.append(ListingModel.profile_id == profile_id)
+        stmt = update(ListingModel).where(*conditions).values(listing_status="DELISTED")
+        res = await self.session.execute(stmt)
+        return int(getattr(res, "rowcount", 0))
+
     async def save_or_update(
         self,
         listing: ListingSchema,
@@ -209,6 +245,13 @@ class ListingRepository:
             existing.cons = filter_result.cons
             _apply_ai_fields(existing, filter_result)
             _apply_llm_cache_fields(existing, llm_cache)
+            if listing.physical_fingerprint:
+                existing.physical_fingerprint = listing.physical_fingerprint
+            if listing.relist_count > 0:
+                existing.relist_count = max(existing.relist_count or 0, listing.relist_count)
+            existing.first_seen_at = listing.first_seen_at or existing.first_seen_at or existing.created_at
+            existing.initial_price = existing.initial_price or listing.initial_price or existing.price
+            existing.listing_status = "ACTIVE"
             existing.updated_at = datetime.now(UTC)
             existing.last_scraped_at = datetime.now(UTC)
 
@@ -233,6 +276,11 @@ class ListingRepository:
             portal_id=listing.id,
             url=listing.url,
             property_fingerprint=listing.property_fingerprint or "unknown",
+            physical_fingerprint=listing.physical_fingerprint,
+            listing_status=listing.listing_status or "ACTIVE",
+            first_seen_at=listing.first_seen_at or datetime.now(UTC),
+            initial_price=listing.initial_price or listing.price,
+            relist_count=listing.relist_count or 0,
             title=listing.title,
             price=listing.price,
             price_per_m2=listing.price_per_m2,

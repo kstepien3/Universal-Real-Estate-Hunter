@@ -182,6 +182,16 @@ class LiveDashboardServer:
             ollama_model=getattr(cfg, "ollama_model", None),
             ollama_base_url=getattr(cfg, "ollama_base_url", None),
             ollama_timeout_seconds=getattr(cfg, "ollama_timeout_seconds", None),
+            ollama_temperature=getattr(cfg, "ollama_temperature", None),
+            ollama_num_ctx=getattr(cfg, "ollama_num_ctx", None),
+            local_llm_base_url=getattr(cfg, "local_llm_base_url", None),
+            local_llm_model=getattr(cfg, "local_llm_model", None),
+            local_llm_api_key=getattr(cfg, "local_llm_api_key", None),
+            local_llm_temperature=getattr(cfg, "local_llm_temperature", None),
+            local_llm_timeout_seconds=getattr(cfg, "local_llm_timeout_seconds", None),
+            local_llm_preset=getattr(cfg, "local_llm_preset", None),
+            local_llm_num_ctx=getattr(cfg, "local_llm_num_ctx", None),
+            cloud_llm_timeout_seconds=getattr(cfg, "cloud_llm_timeout_seconds", None),
             openrouter_model=getattr(cfg, "openrouter_model", None),
             llm_provider=getattr(cfg, "llm_provider", None),
         )
@@ -195,6 +205,16 @@ class LiveDashboardServer:
         ollama_model = None
         ollama_base_url = None
         ollama_timeout_seconds = None
+        ollama_temperature = None
+        ollama_num_ctx = None
+        local_llm_base_url = None
+        local_llm_model = None
+        local_llm_api_key = None
+        local_llm_temperature = None
+        local_llm_timeout_seconds = None
+        local_llm_preset = None
+        local_llm_num_ctx = None
+        cloud_llm_timeout_seconds = None
         openrouter_model = None
         llm_provider = None
         if request.can_read_body and (request.content_length or 0) > 0:
@@ -210,6 +230,44 @@ class LiveDashboardServer:
                             ollama_timeout_seconds = max(10.0, float(body["ollama_timeout_seconds"]))
                         except (TypeError, ValueError):
                             pass
+                    if body.get("ollama_temperature") is not None:
+                        try:
+                            ollama_temperature = max(0.0, min(1.0, float(body["ollama_temperature"])))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("ollama_num_ctx"):
+                        try:
+                            ollama_num_ctx = max(2048, int(body["ollama_num_ctx"]))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("local_llm_base_url"):
+                        local_llm_base_url = str(body["local_llm_base_url"]).strip().rstrip("/")
+                    if body.get("local_llm_model") is not None:
+                        local_llm_model = str(body["local_llm_model"]).strip()
+                    if body.get("local_llm_api_key") is not None:
+                        local_llm_api_key = str(body["local_llm_api_key"]).strip()
+                    if body.get("local_llm_preset") is not None:
+                        local_llm_preset = str(body["local_llm_preset"]).strip()
+                    if body.get("local_llm_temperature") is not None:
+                        try:
+                            local_llm_temperature = max(0.0, min(1.0, float(body["local_llm_temperature"])))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("local_llm_timeout_seconds"):
+                        try:
+                            local_llm_timeout_seconds = max(10.0, float(body["local_llm_timeout_seconds"]))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("local_llm_num_ctx"):
+                        try:
+                            local_llm_num_ctx = max(2048, int(body["local_llm_num_ctx"]))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("cloud_llm_timeout_seconds"):
+                        try:
+                            cloud_llm_timeout_seconds = max(5.0, float(body["cloud_llm_timeout_seconds"]))
+                        except (TypeError, ValueError):
+                            pass
                     if body.get("openrouter_model"):
                         openrouter_model = str(body["openrouter_model"]).strip()
                     if body.get("llm_provider"):
@@ -222,6 +280,24 @@ class LiveDashboardServer:
             ollama_model=ollama_model or getattr(cfg, "ollama_model", None),
             ollama_base_url=ollama_base_url or getattr(cfg, "ollama_base_url", None),
             ollama_timeout_seconds=ollama_timeout_seconds or getattr(cfg, "ollama_timeout_seconds", None),
+            ollama_temperature=ollama_temperature
+            if ollama_temperature is not None
+            else getattr(cfg, "ollama_temperature", None),
+            ollama_num_ctx=ollama_num_ctx if ollama_num_ctx is not None else getattr(cfg, "ollama_num_ctx", None),
+            local_llm_base_url=local_llm_base_url or getattr(cfg, "local_llm_base_url", None),
+            local_llm_model=local_llm_model if local_llm_model is not None else getattr(cfg, "local_llm_model", None),
+            local_llm_api_key=local_llm_api_key
+            if local_llm_api_key is not None
+            else getattr(cfg, "local_llm_api_key", None),
+            local_llm_temperature=local_llm_temperature
+            if local_llm_temperature is not None
+            else getattr(cfg, "local_llm_temperature", None),
+            local_llm_timeout_seconds=local_llm_timeout_seconds or getattr(cfg, "local_llm_timeout_seconds", None),
+            local_llm_preset=local_llm_preset or getattr(cfg, "local_llm_preset", None),
+            local_llm_num_ctx=local_llm_num_ctx
+            if local_llm_num_ctx is not None
+            else getattr(cfg, "local_llm_num_ctx", None),
+            cloud_llm_timeout_seconds=cloud_llm_timeout_seconds or getattr(cfg, "cloud_llm_timeout_seconds", None),
             openrouter_model=openrouter_model or getattr(cfg, "openrouter_model", None),
             llm_provider=llm_provider or getattr(cfg, "llm_provider", None),
         )
@@ -529,10 +605,14 @@ class LiveDashboardServer:
                         "ai_questions": item.ai_questions,
                         "contact_phone": item.contact_phone,
                         "contact_person": item.contact_person,
+                        # Re-listing & Lifecycle
+                        "listing_status": getattr(item, "listing_status", None) or "ACTIVE",
+                        "relist_count": getattr(item, "relist_count", 0) or 0,
+                        "first_seen_at": item.first_seen_at.isoformat() if item.first_seen_at is not None else None,
                         # Price Drop History
                         "price_drop_amount": price_drop_amount,
                         "price_drop_pct": price_drop_pct,
-                        "initial_price": initial_price,
+                        "initial_price": getattr(item, "initial_price", None) or initial_price,
                         "price_history_count": len(ph),
                         # Negotiation & Market Intelligence & Automated Audits
                         **valuation.to_dashboard_dict(),

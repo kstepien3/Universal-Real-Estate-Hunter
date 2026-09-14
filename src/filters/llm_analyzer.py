@@ -126,6 +126,16 @@ class LLMAnalyzer:
         ollama_timeout_seconds: float | None = None,
         openrouter_model: str | None = None,
         llm_provider: str | None = None,
+        ollama_temperature: float | None = None,
+        ollama_num_ctx: int | None = None,
+        local_llm_base_url: str | None = None,
+        local_llm_model: str | None = None,
+        local_llm_api_key: str | None = None,
+        local_llm_temperature: float | None = None,
+        local_llm_timeout_seconds: float | None = None,
+        local_llm_preset: str | None = None,
+        local_llm_num_ctx: int | None = None,
+        cloud_llm_timeout_seconds: float | None = None,
     ) -> None:
         cfg = None
         try:
@@ -149,19 +159,94 @@ class LLMAnalyzer:
         self.openai_key = settings.OPENAI_API_KEY
         self.openai_model = settings.OPENAI_MODEL
         self.openai_base_url = settings.OPENAI_BASE_URL
+        self.cloud_llm_timeout_seconds = float(
+            cloud_llm_timeout_seconds or (getattr(cfg, "cloud_llm_timeout_seconds", None) if cfg else None) or 30.0
+        )
+        self.local_llm_preset = (
+            str(local_llm_preset or (getattr(cfg, "local_llm_preset", None) if cfg else None) or "ollama")
+            .lower()
+            .strip()
+        )
+
         raw_ollama_url = (
-            ollama_base_url or (getattr(cfg, "ollama_base_url", None) if cfg else None) or settings.OLLAMA_BASE_URL
+            ollama_base_url
+            or local_llm_base_url
+            or (getattr(cfg, "ollama_base_url", None) if cfg else None)
+            or (getattr(cfg, "local_llm_base_url", None) if cfg else None)
+            or settings.OLLAMA_BASE_URL
         )
         self.ollama_url = self._resolve_default_ollama_url(raw_ollama_url)
         self.ollama_timeout_seconds = float(
-            ollama_timeout_seconds or (getattr(cfg, "ollama_timeout_seconds", None) if cfg else None) or 180.0
+            ollama_timeout_seconds
+            or local_llm_timeout_seconds
+            or (getattr(cfg, "ollama_timeout_seconds", None) if cfg else None)
+            or (getattr(cfg, "local_llm_timeout_seconds", None) if cfg else None)
+            or 180.0
         )
         self.ollama_model = (
-            ollama_model or (getattr(cfg, "ollama_model", None) if cfg else None) or settings.OLLAMA_MODEL
+            ollama_model
+            or local_llm_model
+            or (getattr(cfg, "ollama_model", None) if cfg else None)
+            or (getattr(cfg, "local_llm_model", None) if cfg else None)
+            or settings.OLLAMA_MODEL
         )
+        self.ollama_temperature = float(
+            ollama_temperature
+            if ollama_temperature is not None
+            else (
+                local_llm_temperature
+                if local_llm_temperature is not None
+                else ((getattr(cfg, "ollama_temperature", None) if cfg else None) or 0.0)
+            )
+        )
+        self.ollama_num_ctx = int(
+            ollama_num_ctx
+            if ollama_num_ctx is not None
+            else (
+                local_llm_num_ctx
+                if local_llm_num_ctx is not None
+                else (
+                    (getattr(cfg, "ollama_num_ctx", None) if cfg else None)
+                    or (getattr(cfg, "local_llm_num_ctx", None) if cfg else None)
+                    or 8192
+                )
+            )
+        )
+        raw_local_url = (
+            local_llm_base_url
+            or ollama_base_url
+            or (getattr(cfg, "local_llm_base_url", None) if cfg else None)
+            or (getattr(cfg, "ollama_base_url", None) if cfg else None)
+            or "http://localhost:11434"
+        )
+        if self.local_llm_preset == "ollama" and ":1234" in str(raw_local_url):
+            raw_local_url = (
+                ollama_base_url or (getattr(cfg, "ollama_base_url", None) if cfg else None) or "http://localhost:11434"
+            )
+        self.local_llm_base_url = self._resolve_default_ollama_url(raw_local_url)
+        self.local_llm_model = (
+            local_llm_model
+            or ollama_model
+            or (getattr(cfg, "local_llm_model", None) if cfg else None)
+            or (getattr(cfg, "ollama_model", None) if cfg else None)
+            or ""
+        ).strip()
+        self.local_llm_api_key = (
+            local_llm_api_key
+            if local_llm_api_key is not None
+            else (
+                (getattr(cfg, "local_llm_api_key", None) if cfg else None)
+                or os.getenv("LOCAL_LLM_API_KEY")
+                or "not-needed"
+            )
+        ).strip()
+        self.local_llm_temperature = self.ollama_temperature
+        self.local_llm_timeout_seconds = self.ollama_timeout_seconds
+        self.local_llm_num_ctx = self.ollama_num_ctx
         self.llm_provider = (
             (llm_provider or (getattr(cfg, "llm_provider", None) if cfg else None) or "auto").lower().strip()
         )
+        self.last_measured_tok_per_sec: float | None = None
         # Metadata of the last successful call (kept off the result dict).
         self.last_model: str | None = None
         self.last_prompt_version: str | None = None
@@ -349,21 +434,29 @@ class LLMAnalyzer:
                             ),
                         }
 
-                    # Model is installed, let's verify response latency
+                    # Model is installed, let's verify response latency and generation speed
                     t_gen = time.perf_counter()
                     try:
                         gen_res = await client.post(
                             f"{url}/api/generate",
                             json={
                                 "model": target_model,
-                                "prompt": "ping",
+                                "prompt": "Napisz jedno słowo: OK",
                                 "stream": False,
-                                "options": {"num_predict": 1},
+                                "options": {"num_predict": 5},
                             },
                             timeout=15.0,
                         )
                         gen_ms = round((time.perf_counter() - t_gen) * 1000)
                         if gen_res.status_code == 200:
+                            payload = gen_res.json()
+                            eval_count = payload.get("eval_count") or 0
+                            eval_duration = payload.get("eval_duration") or 0
+                            tps = None
+                            if eval_count > 0 and eval_duration > 0:
+                                tps = round(eval_count / (eval_duration / 1e9), 1)
+                                self.last_measured_tok_per_sec = tps
+                            tps_text = f", prędkość: ~{tps} tok/s" if tps else ""
                             return {
                                 "name": "Ollama (lokalny)",
                                 "configured": True,
@@ -372,7 +465,8 @@ class LLMAnalyzer:
                                 "model": target_model,
                                 "installed_models": models_list,
                                 "latency_ms": gen_ms,
-                                "message": f"Działa poprawnie (model '{target_model}' gotowy, opóźnienie: {gen_ms} ms).",
+                                "tokens_per_second": tps,
+                                "message": f"Działa poprawnie (model '{target_model}' gotowy, opóźnienie: {gen_ms} ms{tps_text}).",
                             }
                     except Exception:
                         pass
@@ -406,12 +500,147 @@ class LLMAnalyzer:
             "message": f"Nie można połączyć się z serwerem Ollama pod {last_url} ({last_error_msg}).{docker_hint} Upewnij się, że usługa działa.",
         }
 
-    async def test_connection(self) -> dict[str, Any]:
-        openrouter_res, openai_res, ollama_res = await asyncio.gather(
-            self.test_openrouter(),
-            self.test_openai(),
-            self.test_ollama(),
+    async def test_local_openai(self) -> dict[str, Any]:
+        """
+        Test connection to local OpenAI-compatible API servers (LM Studio, vLLM, Docker Model Runner, LocalAI).
+        Queries GET /models to verify reachability and enumerate loaded models.
+        """
+        resolved_url = self._resolve_default_ollama_url(self.local_llm_base_url)
+        urls_to_try = [resolved_url]
+        if self.local_llm_base_url not in urls_to_try:
+            urls_to_try.append(self.local_llm_base_url)
+
+        last_error_msg = ""
+        last_url = resolved_url
+        for target_url in urls_to_try:
+            url = target_url.rstrip("/")
+            last_url = url
+            t0 = time.perf_counter()
+            try:
+                models_endpoint = f"{url}/models" if url.endswith("/v1") else f"{url}/v1/models"
+                headers = {}
+                if self.local_llm_api_key and self.local_llm_api_key != "not-needed":
+                    headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
+                else:
+                    headers["Authorization"] = "Bearer not-needed"
+
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    res = await client.get(models_endpoint, headers=headers)
+                    if res.status_code != 200:
+                        last_error_msg = f"Serwer zwrócił kod błędu {res.status_code}."
+                        continue
+
+                    self.local_llm_base_url = url
+                    latency_ms = round((time.perf_counter() - t0) * 1000)
+                    data = res.json()
+                    models_raw = data.get("data", []) if isinstance(data, dict) else []
+                    models_list: list[str] = []
+                    for m in models_raw:
+                        if isinstance(m, dict) and m.get("id"):
+                            models_list.append(str(m["id"]))
+                        elif isinstance(m, str):
+                            models_list.append(m)
+
+                    active_model = self.local_llm_model or (models_list[0] if models_list else "domyślny")
+                    models_str = ", ".join(models_list) if models_list else "brak zgłoszonych ID"
+
+                    return {
+                        "name": "Lokalny OpenAI (LM Studio / vLLM)",
+                        "configured": True,
+                        "url": url,
+                        "status": "ok",
+                        "model": active_model,
+                        "installed_models": models_list,
+                        "latency_ms": latency_ms,
+                        "message": f"Działa poprawnie ({latency_ms} ms). Dostępne modele: {models_str}.",
+                    }
+            except Exception as e:
+                last_error_msg = str(e)
+
+        in_docker = self._is_running_in_docker()
+        docker_hint = (
+            " (Wykryto środowisko Docker: połączenie z hostem wymaga http://host.docker.internal:...)"
+            if in_docker
+            else ""
         )
+        return {
+            "name": "Lokalny OpenAI (LM Studio / vLLM)",
+            "configured": True,
+            "url": last_url,
+            "status": "unreachable",
+            "model": self.local_llm_model or "brak",
+            "installed_models": [],
+            "latency_ms": None,
+            "message": f"Nie można połączyć się z {last_url}{docker_hint}. Błąd: {last_error_msg}",
+        }
+
+    async def test_connection(self) -> dict[str, Any]:
+        pref = (self.llm_provider or "auto").lower().strip()
+        is_local_ollama = pref == "ollama" or (pref == "local" and self.local_llm_preset == "ollama")
+        is_local_openai = pref in ("local_openai", "lmstudio", "vllm", "docker") or (
+            pref == "local" and self.local_llm_preset != "ollama"
+        )
+
+        openrouter_res: dict[str, Any] = {
+            "name": "OpenRouter",
+            "configured": bool(self.openrouter_key),
+            "status": "not_configured",
+            "model": self.openrouter_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+        openai_res: dict[str, Any] = {
+            "name": "OpenAI",
+            "configured": bool(self.openai_key),
+            "status": "not_configured",
+            "model": self.openai_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+        ollama_res: dict[str, Any] = {
+            "name": "Ollama (lokalny)",
+            "configured": True,
+            "url": self.ollama_url,
+            "status": "not_configured",
+            "model": self.ollama_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+        local_res: dict[str, Any] = {
+            "name": "Lokalny OpenAI (LM Studio / vLLM)",
+            "configured": True,
+            "url": self.local_llm_base_url,
+            "status": "not_configured",
+            "model": self.local_llm_model,
+            "installed_models": [],
+            "latency_ms": None,
+            "message": "Niewybrany (aktywny inny dostawca)",
+        }
+
+        if is_local_ollama:
+            ollama_res = await self.test_ollama()
+        elif is_local_openai:
+            local_res = await self.test_local_openai()
+        elif pref == "openrouter":
+            openrouter_res = await self.test_openrouter()
+        elif pref == "openai":
+            openai_res = await self.test_openai()
+        else:  # "auto"
+            if self.local_llm_preset == "ollama":
+                openrouter_res, openai_res, ollama_res = await asyncio.gather(
+                    self.test_openrouter(),
+                    self.test_openai(),
+                    self.test_ollama(),
+                )
+            else:
+                openrouter_res, openai_res, local_res = await asyncio.gather(
+                    self.test_openrouter(),
+                    self.test_openai(),
+                    self.test_local_openai(),
+                )
 
         providers_map = {
             "openrouter": {
@@ -428,6 +657,13 @@ class LLMAnalyzer:
                 "label": f"OpenAI ({self.openai_model})",
                 "status": openai_res.get("status"),
             },
+            "local_openai": {
+                "id": "local_openai",
+                "name": "Lokalny OpenAI (LM Studio / vLLM)",
+                "model": self.local_llm_model or local_res.get("model") or "auto",
+                "label": f"Lokalny OpenAI ({self.local_llm_model or local_res.get('model') or self.local_llm_base_url})",
+                "status": local_res.get("status"),
+            },
             "ollama": {
                 "id": "ollama",
                 "name": "Ollama (lokalny)",
@@ -438,10 +674,12 @@ class LLMAnalyzer:
         }
 
         active_provider = None
-        pref = self.llm_provider
-        if pref == "ollama":
+        if is_local_ollama:
             if ollama_res.get("status") == "ok":
                 active_provider = providers_map["ollama"]
+        elif is_local_openai:
+            if local_res.get("status") == "ok":
+                active_provider = providers_map["local_openai"]
         elif pref == "openrouter":
             if openrouter_res.get("status") == "ok":
                 active_provider = providers_map["openrouter"]
@@ -449,10 +687,12 @@ class LLMAnalyzer:
             if openai_res.get("status") == "ok":
                 active_provider = providers_map["openai"]
         else:  # "auto"
-            for p_id in ("openrouter", "openai", "ollama"):
+            for p_id in ("openrouter", "openai", "local_openai", "ollama"):
                 if providers_map[p_id]["status"] == "ok":
                     active_provider = providers_map[p_id]
                     break
+
+        from src.filters.hardware import SUGGESTED_OLLAMA_MODELS
 
         return {
             "enabled": bool(self.enabled),
@@ -462,8 +702,10 @@ class LLMAnalyzer:
             "providers": {
                 "openrouter": openrouter_res,
                 "openai": openai_res,
+                "local_openai": local_res,
                 "ollama": ollama_res,
             },
+            "suggested_models": SUGGESTED_OLLAMA_MODELS,
         }
 
     @staticmethod
@@ -503,7 +745,7 @@ class LLMAnalyzer:
             client = AsyncOpenAI(
                 api_key=self.openrouter_key,
                 base_url="https://openrouter.ai/api/v1",
-                timeout=15.0,
+                timeout=self.cloud_llm_timeout_seconds,
                 default_headers={
                     "HTTP-Referer": "https://github.com/p-sternik/Universal-Real-Estate-Hunter",
                     "X-Title": "Universal Real Estate Hunter",
@@ -542,7 +784,7 @@ class LLMAnalyzer:
             client = AsyncOpenAI(
                 api_key=self.openai_key,
                 base_url=self.openai_base_url,
-                timeout=15.0,
+                timeout=self.cloud_llm_timeout_seconds,
             )
             response = await _chat_completion_with_retry(
                 client,
@@ -566,6 +808,41 @@ class LLMAnalyzer:
             if _is_rate_limit_error(e):
                 _mark_provider_cooldown("openai")
             logger.warning(f"[LLMAnalyzer] OpenAI error: {e}")
+        return None
+
+    async def _call_local_openai(self, prompt: str, listing: ListingSchema) -> dict[str, Any] | None:
+        try:
+            from openai import AsyncOpenAI
+
+            model_to_use = self.local_llm_model or "default"
+            logger.info(
+                f"[LLMAnalyzer] Zapytanie do Lokalnego OpenAI/LM Studio ({model_to_use} @ {self.local_llm_base_url}) "
+                f"dla: '{listing.title[:35]}'"
+            )
+            client = AsyncOpenAI(
+                api_key=self.local_llm_api_key or "not-needed",
+                base_url=self.local_llm_base_url,
+                timeout=self.local_llm_timeout_seconds,
+            )
+            response = await _chat_completion_with_retry(
+                client,
+                model=model_to_use,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=self.local_llm_temperature,
+            )
+            content = response.choices[0].message.content or "{}"
+            result = self._parse_json(content)
+            if result:
+                logger.info(
+                    f"[LLMAnalyzer] Lokalny OpenAI: pomyślnie przeanalizowano '{listing.title[:35]}' "
+                    f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+                )
+                return result
+        except Exception as e:
+            logger.warning(f"[LLMAnalyzer] Błąd lokalnego serwera OpenAI ({self.local_llm_base_url}): {e}")
         return None
 
     async def _call_ollama(self, prompt: str, listing: ListingSchema) -> dict[str, Any] | None:
@@ -596,19 +873,26 @@ class LLMAnalyzer:
                             "format": "json",
                             "stream": False,
                             "options": {
-                                "temperature": 0,
-                                "num_ctx": 8192,
+                                "temperature": self.ollama_temperature,
+                                "num_ctx": self.ollama_num_ctx,
                             },
                         },
                     )
                     if res.status_code == 200:
                         payload = res.json()
+                        eval_count = payload.get("eval_count") or 0
+                        eval_duration = payload.get("eval_duration") or 0
+                        tps_log = ""
+                        if eval_count > 0 and eval_duration > 0:
+                            tps = round(eval_count / (eval_duration / 1e9), 1)
+                            self.last_measured_tok_per_sec = tps
+                            tps_log = f", {tps} tok/s"
                         result = self._parse_json(payload.get("response", "{}"))
                         if result:
                             self.ollama_url = url
                             logger.info(
                                 f"[LLMAnalyzer] Ollama: pomyślnie przeanalizowano '{listing.title[:35]}' "
-                                f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+                                f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')}{tps_log})"
                             )
                             return result
             except httpx.TimeoutException:
@@ -714,12 +998,14 @@ class LLMAnalyzer:
         providers_to_try: list[str] = []
         if self.llm_provider == "ollama":
             providers_to_try = ["ollama"]
+        elif self.llm_provider in ("local_openai", "lmstudio", "vllm", "local"):
+            providers_to_try = ["local_openai"]
         elif self.llm_provider == "openrouter":
             providers_to_try = ["openrouter"]
         elif self.llm_provider == "openai":
             providers_to_try = ["openai"]
         else:  # "auto" or anything else
-            providers_to_try = ["openrouter", "openai", "ollama"]
+            providers_to_try = ["openrouter", "openai", "local_openai", "ollama"]
 
         active_model = ""
         for p in providers_to_try:
@@ -733,6 +1019,9 @@ class LLMAnalyzer:
             elif p == "openai":
                 res = await self._call_openai(prompt, listing)
                 active_model = self.openai_model
+            elif p == "local_openai":
+                res = await self._call_local_openai(prompt, listing)
+                active_model = self.local_llm_model or "local-openai"
             elif p == "ollama":
                 res = await self._call_ollama(prompt, listing)
                 active_model = self.ollama_model

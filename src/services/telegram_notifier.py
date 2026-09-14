@@ -58,6 +58,18 @@ class TelegramNotifier:
             f"🚗 Droga: <b>{listing.access_road_type.value}</b>",
         ]
 
+        if getattr(listing, "relist_count", 0) > 0:
+            relist_drop = ""
+            init_p = getattr(listing, "initial_price", None)
+            if init_p and init_p > listing.price:
+                diff = init_p - listing.price
+                pct = (diff / init_p) * 100
+                relist_drop = f" (obniżka o {diff:,.0f} zł / -{pct:.1f}%)"
+            lines.insert(
+                2,
+                f"🔁 <b>POZORNY RE-LISTING ({listing.relist_count}x):</b> pierwotnie {init_p:,.0f} zł{relist_drop}",
+            )
+
         if filter_result.pros:
             lines.append("\n🌟 <b>Zalety z opisu:</b>")
             for p in filter_result.pros[:4]:

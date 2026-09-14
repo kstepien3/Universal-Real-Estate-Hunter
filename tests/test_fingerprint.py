@@ -52,3 +52,65 @@ def test_extract_street_token_unknown_fallback():
     # When no street pattern matches in street or title
     token = extract_street_token(street="", title="Nieruchomość bez nazwy ulicy")
     assert token == "unknown_area", f"Expected unknown_area, got {token}"
+
+
+def test_physical_fingerprint_price_independent():
+    from src.filters.fingerprint import generate_physical_fingerprint
+
+    # Original listing: 125m2, 400m2 plot, 5 rooms, Paderewskiego, Rzeszów
+    fp1 = generate_physical_fingerprint(
+        area_home=125.0,
+        area_plot=400.0,
+        rooms=5,
+        street="Paderewskiego",
+        city="Rzeszów",
+    )
+
+    # Re-listed with massive price drop and slightly different wording:
+    # 124m2 (+/- 2m2 tolerance), 404m2 plot, same rooms and street
+    fp2 = generate_physical_fingerprint(
+        area_home=124.0,
+        area_plot=404.0,
+        rooms=5,
+        street="ul. Ignacego Paderewskiego",
+        city="rzeszow",
+    )
+
+    assert fp1 is not None
+    assert fp1 == fp2, "Physical fingerprint must match across re-listings regardless of price"
+
+
+def test_physical_fingerprint_differentiation():
+    from src.filters.fingerprint import generate_physical_fingerprint
+
+    fp1 = generate_physical_fingerprint(
+        area_home=120.0,
+        area_plot=300.0,
+        rooms=4,
+        street="Paderewskiego",
+        city="Warszawa",
+    )
+    fp2 = generate_physical_fingerprint(
+        area_home=120.0,
+        area_plot=300.0,
+        rooms=4,
+        street="Paderewskiego",
+        city="Kraków",
+    )
+    assert fp1 != fp2, "Same street in different cities must have different physical fingerprints"
+
+
+def test_physical_fingerprint_unknown_fallback():
+    from src.filters.fingerprint import generate_physical_fingerprint
+
+    # When location is completely unknown, should return None to avoid false collisions
+    fp = generate_physical_fingerprint(
+        area_home=60.0,
+        area_plot=None,
+        street=None,
+        district=None,
+        city=None,
+        location_raw="",
+        title="Mieszkanie na sprzedaż",
+    )
+    assert fp is None
