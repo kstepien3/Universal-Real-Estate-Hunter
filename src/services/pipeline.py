@@ -7,7 +7,6 @@ from loguru import logger
 from sqlalchemy import select
 
 from config import settings
-from src.filters import QualificationEngine
 from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.listing import (
     AIR_FIELDS,
@@ -57,6 +56,8 @@ class ScraperPipeline:
         self.discord = discord_notifier or DiscordNotifier()
         self.telegram = telegram_notifier or TelegramNotifier()
         self.llm_analysis_enabled = settings.USE_LLM_ANALYSIS
+        from src.filters import QualificationEngine
+
         self.engine = QualificationEngine(llm_enabled=self.llm_analysis_enabled)
 
     async def process_listing(
@@ -550,6 +551,8 @@ class ScraperPipeline:
 
         cfg = config_manager.get_config()
         self.llm_analysis_enabled = bool(getattr(cfg, "llm_analysis_enabled", settings.USE_LLM_ANALYSIS))
+        from src.filters import QualificationEngine
+
         self.engine = QualificationEngine(llm_enabled=self.llm_analysis_enabled)
         if self.llm_analysis_enabled:
             logger.info(

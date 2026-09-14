@@ -182,6 +182,8 @@ class LiveDashboardServer:
             ollama_model=getattr(cfg, "ollama_model", None),
             ollama_base_url=getattr(cfg, "ollama_base_url", None),
             ollama_timeout_seconds=getattr(cfg, "ollama_timeout_seconds", None),
+            ollama_temperature=getattr(cfg, "ollama_temperature", None),
+            ollama_num_ctx=getattr(cfg, "ollama_num_ctx", None),
             openrouter_model=getattr(cfg, "openrouter_model", None),
             llm_provider=getattr(cfg, "llm_provider", None),
         )
@@ -195,6 +197,8 @@ class LiveDashboardServer:
         ollama_model = None
         ollama_base_url = None
         ollama_timeout_seconds = None
+        ollama_temperature = None
+        ollama_num_ctx = None
         openrouter_model = None
         llm_provider = None
         if request.can_read_body and (request.content_length or 0) > 0:
@@ -210,6 +214,16 @@ class LiveDashboardServer:
                             ollama_timeout_seconds = max(10.0, float(body["ollama_timeout_seconds"]))
                         except (TypeError, ValueError):
                             pass
+                    if body.get("ollama_temperature") is not None:
+                        try:
+                            ollama_temperature = max(0.0, min(1.0, float(body["ollama_temperature"])))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("ollama_num_ctx"):
+                        try:
+                            ollama_num_ctx = max(2048, int(body["ollama_num_ctx"]))
+                        except (TypeError, ValueError):
+                            pass
                     if body.get("openrouter_model"):
                         openrouter_model = str(body["openrouter_model"]).strip()
                     if body.get("llm_provider"):
@@ -222,6 +236,10 @@ class LiveDashboardServer:
             ollama_model=ollama_model or getattr(cfg, "ollama_model", None),
             ollama_base_url=ollama_base_url or getattr(cfg, "ollama_base_url", None),
             ollama_timeout_seconds=ollama_timeout_seconds or getattr(cfg, "ollama_timeout_seconds", None),
+            ollama_temperature=ollama_temperature
+            if ollama_temperature is not None
+            else getattr(cfg, "ollama_temperature", None),
+            ollama_num_ctx=ollama_num_ctx if ollama_num_ctx is not None else getattr(cfg, "ollama_num_ctx", None),
             openrouter_model=openrouter_model or getattr(cfg, "openrouter_model", None),
             llm_provider=llm_provider or getattr(cfg, "llm_provider", None),
         )

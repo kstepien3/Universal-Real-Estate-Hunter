@@ -754,6 +754,12 @@
             if (document.getElementById('cfgOllamaTimeout')) {
                 document.getElementById('cfgOllamaTimeout').value = activeConfig.ollama_timeout_seconds ?? 180;
             }
+            if (document.getElementById('cfgOllamaTemperature')) {
+                document.getElementById('cfgOllamaTemperature').value = activeConfig.ollama_temperature ?? 0.0;
+            }
+            if (document.getElementById('cfgOllamaNumCtx')) {
+                document.getElementById('cfgOllamaNumCtx').value = String(activeConfig.ollama_num_ctx ?? 8192);
+            }
             if (document.getElementById('cfgOpenRouterModel')) {
                 document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
             }
@@ -840,9 +846,11 @@
                 capex: capexPayload,
                 llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
                 llm_provider: document.getElementById('cfgLlmProvider')?.value || 'auto',
-                ollama_model: document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b',
+                ollama_model: document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b',
                 ollama_base_url: document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || 'http://localhost:11434',
                 ollama_timeout_seconds: parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || 180,
+                ollama_temperature: parseFloat(document.getElementById('cfgOllamaTemperature')?.value) || 0.0,
+                ollama_num_ctx: parseInt(document.getElementById('cfgOllamaNumCtx')?.value, 10) || 8192,
                 openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro'
             };
 
@@ -2565,9 +2573,9 @@
         function updateOllamaSelectOptions(installedModels, currentVal) {
             const sel = document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
-            const defaults = ['llama3.1:8b', 'qwen2.5:7b', 'qwen2.5:3b'];
+            const defaults = ['qwen2.5:7b', 'bielik:11b-v2.3-instruct', 'qwen2.5:14b', 'llama3.1:8b', 'llama3.2:3b'];
             const allModels = Array.from(new Set([...(installedModels || []), ...defaults]));
-            const cur = currentVal || document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b';
+            const cur = currentVal || document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b';
             let html = allModels.map(m => {
                 const isInst = (installedModels || []).includes(m);
                 const tag = isInst ? ' (pobrany)' : '';
@@ -2597,6 +2605,8 @@
             const requestedProvider = document.getElementById('cfgLlmProvider')?.value || null;
             const requestedOllamaUrl = document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || null;
             const requestedOllamaTimeout = parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || null;
+            const requestedOllamaTemp = parseFloat(document.getElementById('cfgOllamaTemperature')?.value) ?? null;
+            const requestedOllamaCtx = parseInt(document.getElementById('cfgOllamaNumCtx')?.value, 10) || null;
 
             if (btn) btn.disabled = true;
             if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
@@ -2609,6 +2619,8 @@
                     ollama_model: requestedModel,
                     ollama_base_url: requestedOllamaUrl,
                     ollama_timeout_seconds: requestedOllamaTimeout,
+                    ollama_temperature: requestedOllamaTemp,
+                    ollama_num_ctx: requestedOllamaCtx,
                     openrouter_model: requestedOpenRouter,
                     llm_provider: requestedProvider
                 });
@@ -2720,6 +2732,26 @@
                 </div>
             `;
 
+            let hwHtml = '';
+            if (data.hardware_profile) {
+                const hw = data.hardware_profile;
+                hwHtml = `
+                    <div class="llm-hw-banner" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+                        <div style="flex:1;min-width:200px;">
+                            <div style="font-weight:600;font-size:12px;display:flex;align-items:center;gap:6px;">
+                                <span>🖥️ ${escapeHtml(hw.device_label || 'Wykryty sprzęt')}</span>
+                            </div>
+                            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                                💡 ${escapeHtml(hw.recommendation_reason || '')}
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-ghost" onclick="setOllamaModelChip('${escapeHtml(hw.recommended_model || 'qwen2.5:7b')}')" style="font-size:11px;white-space:nowrap;">
+                            Wybierz: ${escapeHtml(hw.recommended_model || 'qwen2.5:7b')}
+                        </button>
+                    </div>
+                `;
+            }
+
             let installedChips = '';
             if (ol.installed_models && ol.installed_models.length > 0) {
                 installedChips = `
@@ -2732,16 +2764,28 @@
                 `;
             }
 
+            const tps = ol.tokens_per_second;
+            let tpsBadge = '';
+            if (tps) {
+                const estSec = Math.round(300 / tps);
+                if (tps >= 15) {
+                    tpsBadge = `<span class="meta-tag tag-exact" style="margin-left:auto;" title="Akceleracja GPU (~${estSec}s na analizę oferty)">⚡ ${tps} tok/s (GPU)</span>`;
+                } else {
+                    tpsBadge = `<span class="meta-tag tag-vis" style="margin-left:auto;" title="Praca na CPU (~${estSec}s na analizę oferty) — rozważ mniejszy model 3B">⚠️ ${tps} tok/s (CPU)</span>`;
+                }
+            }
+
             const olRow = `
                 <div class="llm-provider-row" style="flex-direction:column;align-items:stretch;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <div class="llm-provider-title-row">
+                        <div class="llm-provider-title-row" style="flex:1;">
                             <span class="llm-dot ${getDotClass(ol.status)}"></span>
                             <span class="llm-provider-name">Ollama (lokalny)</span>
-                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(ol.model || 'llama3.1:8b')})</span>
+                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(ol.model || 'qwen2.5:7b')})</span>
                             ${getStatusBadge(ol.status)}
+                            ${tpsBadge}
                         </div>
-                        <span style="font-size:11px;color:var(--text-muted);">${escapeHtml(ol.url || 'http://localhost:11434')}</span>
+                        <span style="font-size:11px;color:var(--text-muted);margin-left:8px;">${escapeHtml(ol.url || 'http://localhost:11434')}</span>
                     </div>
                     <div class="llm-provider-msg" style="margin-top:4px;">
                         ${escapeHtml(ol.message || '')}
@@ -2751,6 +2795,7 @@
             `;
 
             container.innerHTML = `
+                ${hwHtml}
                 ${bannerHtml}
                 <div class="llm-provider-list">
                     ${orRow}

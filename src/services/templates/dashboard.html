@@ -931,23 +931,44 @@
                         <label for="cfgOllamaModelSelect">Model dla lokalnego Ollama:</label>
                         <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
                             <select id="cfgOllamaModelSelect" style="flex:1;" onchange="onOllamaSelectChange(this.value)">
-                                <option value="llama3.1:8b">llama3.1:8b (zalecany, 4.9 GB)</option>
-                                <option value="qwen2.5:7b">qwen2.5:7b (szybki)</option>
-                                <option value="qwen2.5:3b">qwen2.5:3b (bardzo lekki)</option>
+                                <option value="qwen2.5:7b">qwen2.5:7b (zalecany domyślny, 4.7 GB)</option>
+                                <option value="bielik:11b-v2.3-instruct">bielik:11b-v2.3-instruct (polski ekspert, 6.5 GB)</option>
+                                <option value="qwen2.5:14b">qwen2.5:14b (wysoka precyzja, 9.0 GB)</option>
+                                <option value="llama3.1:8b">llama3.1:8b (uniwersalny, 4.9 GB)</option>
+                                <option value="llama3.2:3b">llama3.2:3b (lekki / tylko CPU, 2.0 GB)</option>
                                 <option value="custom">Inny / wpisany ręcznie...</option>
                             </select>
                         </div>
                         <div class="config-input-chips-group">
-                            <input type="text" id="cfgOllamaModel" placeholder="llama3.1:8b" class="config-chips-input" oninput="onOllamaInputCustom(this.value)">
+                            <input type="text" id="cfgOllamaModel" placeholder="qwen2.5:7b" class="config-chips-input" oninput="onOllamaInputCustom(this.value)">
                             <div class="config-chips-btns">
-                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('llama3.1:8b')">llama3.1:8b</button>
                                 <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:7b')">qwen2.5:7b</button>
-                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:3b')">qwen2.5:3b</button>
+                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('bielik:11b-v2.3-instruct')">bielik:11b</button>
+                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:14b')">qwen2.5:14b</button>
+                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('llama3.2:3b')">llama3.2:3b</button>
                             </div>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
                             Wybierz z listy wykrytych modeli lub wpisz dowolny model pobrany przez <code>ollama pull</code>.
                         </div>
+
+                        <details style="margin-top:10px;font-size:12px;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;">
+                            <summary style="cursor:pointer;font-weight:600;color:var(--text-main);">Zaawansowane parametry Ollama (kontekst, temperatura)</summary>
+                            <div class="config-row2" style="margin-top:8px;">
+                                <div class="config-field">
+                                    <label for="cfgOllamaNumCtx">Rozmiar kontekstu (num_ctx):</label>
+                                    <select id="cfgOllamaNumCtx" style="width:100%;">
+                                        <option value="4096">4096 tokenów (mniejsze zużycie VRAM)</option>
+                                        <option value="8192" selected>8192 tokenów (zalecane domyślne)</option>
+                                        <option value="16384">16384 tokenów (duże opisy / mocne GPU)</option>
+                                    </select>
+                                </div>
+                                <div class="config-field">
+                                    <label for="cfgOllamaTemperature">Temperatura (0 = ścisły determinizm):</label>
+                                    <input type="number" id="cfgOllamaTemperature" value="0.0" min="0.0" max="1.0" step="0.1" style="width:100%;">
+                                </div>
+                            </div>
+                        </details>
                     </div>
 
                     <div class="config-field" id="openrouterModelField" style="margin-top:14px;">

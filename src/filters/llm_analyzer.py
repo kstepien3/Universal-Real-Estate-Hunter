@@ -126,6 +126,8 @@ class LLMAnalyzer:
         ollama_timeout_seconds: float | None = None,
         openrouter_model: str | None = None,
         llm_provider: str | None = None,
+        ollama_temperature: float | None = None,
+        ollama_num_ctx: int | None = None,
     ) -> None:
         cfg = None
         try:
@@ -159,9 +161,20 @@ class LLMAnalyzer:
         self.ollama_model = (
             ollama_model or (getattr(cfg, "ollama_model", None) if cfg else None) or settings.OLLAMA_MODEL
         )
+        self.ollama_temperature = float(
+            ollama_temperature
+            if ollama_temperature is not None
+            else (getattr(cfg, "ollama_temperature", None) if cfg else None) or 0.0
+        )
+        self.ollama_num_ctx = int(
+            ollama_num_ctx
+            if ollama_num_ctx is not None
+            else (getattr(cfg, "ollama_num_ctx", None) if cfg else None) or 8192
+        )
         self.llm_provider = (
             (llm_provider or (getattr(cfg, "llm_provider", None) if cfg else None) or "auto").lower().strip()
         )
+        self.last_measured_tok_per_sec: float | None = None
         # Metadata of the last successful call (kept off the result dict).
         self.last_model: str | None = None
         self.last_prompt_version: str | None = None
@@ -349,21 +362,29 @@ class LLMAnalyzer:
                             ),
                         }
 
-                    # Model is installed, let's verify response latency
+                    # Model is installed, let's verify response latency and generation speed
                     t_gen = time.perf_counter()
                     try:
                         gen_res = await client.post(
                             f"{url}/api/generate",
                             json={
                                 "model": target_model,
-                                "prompt": "ping",
+                                "prompt": "Napisz jedno słowo: OK",
                                 "stream": False,
-                                "options": {"num_predict": 1},
+                                "options": {"num_predict": 5},
                             },
                             timeout=15.0,
                         )
                         gen_ms = round((time.perf_counter() - t_gen) * 1000)
                         if gen_res.status_code == 200:
+                            payload = gen_res.json()
+                            eval_count = payload.get("eval_count") or 0
+                            eval_duration = payload.get("eval_duration") or 0
+                            tps = None
+                            if eval_count > 0 and eval_duration > 0:
+                                tps = round(eval_count / (eval_duration / 1e9), 1)
+                                self.last_measured_tok_per_sec = tps
+                            tps_text = f", prędkość: ~{tps} tok/s" if tps else ""
                             return {
                                 "name": "Ollama (lokalny)",
                                 "configured": True,
@@ -372,7 +393,8 @@ class LLMAnalyzer:
                                 "model": target_model,
                                 "installed_models": models_list,
                                 "latency_ms": gen_ms,
-                                "message": f"Działa poprawnie (model '{target_model}' gotowy, opóźnienie: {gen_ms} ms).",
+                                "tokens_per_second": tps,
+                                "message": f"Działa poprawnie (model '{target_model}' gotowy, opóźnienie: {gen_ms} ms{tps_text}).",
                             }
                     except Exception:
                         pass
@@ -454,6 +476,10 @@ class LLMAnalyzer:
                     active_provider = providers_map[p_id]
                     break
 
+        from src.filters.hardware import SUGGESTED_OLLAMA_MODELS, detect_hardware_profile
+
+        hw_profile = detect_hardware_profile()
+
         return {
             "enabled": bool(self.enabled),
             "configured_provider": self.llm_provider,
@@ -464,6 +490,8 @@ class LLMAnalyzer:
                 "openai": openai_res,
                 "ollama": ollama_res,
             },
+            "hardware_profile": hw_profile,
+            "suggested_models": SUGGESTED_OLLAMA_MODELS,
         }
 
     @staticmethod
@@ -596,19 +624,26 @@ class LLMAnalyzer:
                             "format": "json",
                             "stream": False,
                             "options": {
-                                "temperature": 0,
-                                "num_ctx": 8192,
+                                "temperature": self.ollama_temperature,
+                                "num_ctx": self.ollama_num_ctx,
                             },
                         },
                     )
                     if res.status_code == 200:
                         payload = res.json()
+                        eval_count = payload.get("eval_count") or 0
+                        eval_duration = payload.get("eval_duration") or 0
+                        tps_log = ""
+                        if eval_count > 0 and eval_duration > 0:
+                            tps = round(eval_count / (eval_duration / 1e9), 1)
+                            self.last_measured_tok_per_sec = tps
+                            tps_log = f", {tps} tok/s"
                         result = self._parse_json(payload.get("response", "{}"))
                         if result:
                             self.ollama_url = url
                             logger.info(
                                 f"[LLMAnalyzer] Ollama: pomyślnie przeanalizowano '{listing.title[:35]}' "
-                                f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+                                f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')}{tps_log})"
                             )
                             return result
             except httpx.TimeoutException:

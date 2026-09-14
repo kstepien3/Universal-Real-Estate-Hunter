@@ -459,6 +459,8 @@ class SearchConfig(BaseModel):
     ollama_model: str = Field(default_factory=lambda: settings.OLLAMA_MODEL)
     ollama_base_url: str = Field(default_factory=lambda: settings.OLLAMA_BASE_URL)
     ollama_timeout_seconds: float = 180.0
+    ollama_temperature: float = 0.0
+    ollama_num_ctx: int = 8192
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
     capex: CapexSettings = Field(default_factory=CapexSettings)
 
@@ -646,6 +648,16 @@ class ConfigManager:
                 pass
         if "openrouter_model" in updates and updates["openrouter_model"]:
             current_dict["openrouter_model"] = str(updates["openrouter_model"]).strip()
+        if "ollama_temperature" in updates and updates["ollama_temperature"] is not None:
+            try:
+                current_dict["ollama_temperature"] = max(0.0, min(1.0, float(updates["ollama_temperature"])))
+            except (TypeError, ValueError):
+                pass
+        if "ollama_num_ctx" in updates and updates["ollama_num_ctx"] is not None:
+            try:
+                current_dict["ollama_num_ctx"] = max(1024, int(updates["ollama_num_ctx"]))
+            except (TypeError, ValueError):
+                pass
 
         # Support updating first/active profile directly if flat keys were provided
         flat_keys = {
@@ -662,6 +674,8 @@ class ConfigManager:
                 "ollama_model",
                 "ollama_base_url",
                 "ollama_timeout_seconds",
+                "ollama_temperature",
+                "ollama_num_ctx",
                 "openrouter_model",
             )
         }
