@@ -189,6 +189,9 @@ class LiveDashboardServer:
             local_llm_api_key=getattr(cfg, "local_llm_api_key", None),
             local_llm_temperature=getattr(cfg, "local_llm_temperature", None),
             local_llm_timeout_seconds=getattr(cfg, "local_llm_timeout_seconds", None),
+            local_llm_preset=getattr(cfg, "local_llm_preset", None),
+            local_llm_num_ctx=getattr(cfg, "local_llm_num_ctx", None),
+            cloud_llm_timeout_seconds=getattr(cfg, "cloud_llm_timeout_seconds", None),
             openrouter_model=getattr(cfg, "openrouter_model", None),
             llm_provider=getattr(cfg, "llm_provider", None),
         )
@@ -209,6 +212,9 @@ class LiveDashboardServer:
         local_llm_api_key = None
         local_llm_temperature = None
         local_llm_timeout_seconds = None
+        local_llm_preset = None
+        local_llm_num_ctx = None
+        cloud_llm_timeout_seconds = None
         openrouter_model = None
         llm_provider = None
         if request.can_read_body and (request.content_length or 0) > 0:
@@ -240,6 +246,8 @@ class LiveDashboardServer:
                         local_llm_model = str(body["local_llm_model"]).strip()
                     if body.get("local_llm_api_key") is not None:
                         local_llm_api_key = str(body["local_llm_api_key"]).strip()
+                    if body.get("local_llm_preset") is not None:
+                        local_llm_preset = str(body["local_llm_preset"]).strip()
                     if body.get("local_llm_temperature") is not None:
                         try:
                             local_llm_temperature = max(0.0, min(1.0, float(body["local_llm_temperature"])))
@@ -248,6 +256,16 @@ class LiveDashboardServer:
                     if body.get("local_llm_timeout_seconds"):
                         try:
                             local_llm_timeout_seconds = max(10.0, float(body["local_llm_timeout_seconds"]))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("local_llm_num_ctx"):
+                        try:
+                            local_llm_num_ctx = max(2048, int(body["local_llm_num_ctx"]))
+                        except (TypeError, ValueError):
+                            pass
+                    if body.get("cloud_llm_timeout_seconds"):
+                        try:
+                            cloud_llm_timeout_seconds = max(5.0, float(body["cloud_llm_timeout_seconds"]))
                         except (TypeError, ValueError):
                             pass
                     if body.get("openrouter_model"):
@@ -275,6 +293,11 @@ class LiveDashboardServer:
             if local_llm_temperature is not None
             else getattr(cfg, "local_llm_temperature", None),
             local_llm_timeout_seconds=local_llm_timeout_seconds or getattr(cfg, "local_llm_timeout_seconds", None),
+            local_llm_preset=local_llm_preset or getattr(cfg, "local_llm_preset", None),
+            local_llm_num_ctx=local_llm_num_ctx
+            if local_llm_num_ctx is not None
+            else getattr(cfg, "local_llm_num_ctx", None),
+            cloud_llm_timeout_seconds=cloud_llm_timeout_seconds or getattr(cfg, "cloud_llm_timeout_seconds", None),
             openrouter_model=openrouter_model or getattr(cfg, "openrouter_model", None),
             llm_provider=llm_provider or getattr(cfg, "llm_provider", None),
         )

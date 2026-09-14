@@ -739,41 +739,42 @@
                 document.getElementById('cfgLlmAnalysis').checked = !!activeConfig.llm_analysis_enabled;
             }
             if (document.getElementById('cfgLlmProvider')) {
-                const prov = activeConfig.llm_provider || 'auto';
+                let prov = activeConfig.llm_provider || 'auto';
+                if (prov === 'ollama' || prov === 'local_openai') {
+                    prov = 'local';
+                }
                 document.getElementById('cfgLlmProvider').value = prov;
                 if (typeof onLlmProviderChange === 'function') onLlmProviderChange(prov);
             }
-            if (document.getElementById('cfgOllamaModel')) {
-                const olModel = activeConfig.ollama_model || 'llama3.1:8b';
-                document.getElementById('cfgOllamaModel').value = olModel;
-                if (typeof syncOllamaSelectWithInput === 'function') syncOllamaSelectWithInput(olModel);
+            const localPreset = activeConfig.local_llm_preset || 'ollama';
+            if (typeof setLocalEnginePreset === 'function') {
+                setLocalEnginePreset(localPreset, false);
             }
-            if (document.getElementById('cfgOllamaBaseUrl')) {
-                document.getElementById('cfgOllamaBaseUrl').value = activeConfig.ollama_base_url || 'http://localhost:11434';
+            const locModel = activeConfig.local_llm_model || activeConfig.ollama_model || 'qwen2.5:7b';
+            if (document.getElementById('cfgLocalModel')) {
+                document.getElementById('cfgLocalModel').value = locModel;
+                if (typeof syncLocalModelSelectWithInput === 'function') syncLocalModelSelectWithInput(locModel);
             }
-            if (document.getElementById('cfgOllamaTimeout')) {
-                document.getElementById('cfgOllamaTimeout').value = activeConfig.ollama_timeout_seconds ?? 180;
+            if (document.getElementById('cfgLocalBaseUrl')) {
+                document.getElementById('cfgLocalBaseUrl').value = activeConfig.local_llm_base_url || activeConfig.ollama_base_url || 'http://localhost:11434';
             }
-            if (document.getElementById('cfgOllamaTemperature')) {
-                document.getElementById('cfgOllamaTemperature').value = activeConfig.ollama_temperature ?? 0.0;
+            if (document.getElementById('cfgLocalTimeout')) {
+                document.getElementById('cfgLocalTimeout').value = activeConfig.local_llm_timeout_seconds ?? activeConfig.ollama_timeout_seconds ?? 180;
             }
-            if (document.getElementById('cfgOllamaNumCtx')) {
-                document.getElementById('cfgOllamaNumCtx').value = String(activeConfig.ollama_num_ctx ?? 8192);
+            if (document.getElementById('cfgLocalTemperature')) {
+                document.getElementById('cfgLocalTemperature').value = activeConfig.local_llm_temperature ?? activeConfig.ollama_temperature ?? 0.0;
+            }
+            if (document.getElementById('cfgLocalNumCtx')) {
+                document.getElementById('cfgLocalNumCtx').value = String(activeConfig.local_llm_num_ctx ?? activeConfig.ollama_num_ctx ?? 8192);
+            }
+            if (document.getElementById('cfgLocalApiKey')) {
+                document.getElementById('cfgLocalApiKey').value = activeConfig.local_llm_api_key || 'not-needed';
+            }
+            if (document.getElementById('cfgCloudTimeout')) {
+                document.getElementById('cfgCloudTimeout').value = activeConfig.cloud_llm_timeout_seconds ?? 30;
             }
             if (document.getElementById('cfgOpenRouterModel')) {
                 document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
-            }
-            if (document.getElementById('cfgLocalLlmBaseUrl')) {
-                document.getElementById('cfgLocalLlmBaseUrl').value = activeConfig.local_llm_base_url || 'http://localhost:1234/v1';
-            }
-            if (document.getElementById('cfgLocalLlmModel')) {
-                document.getElementById('cfgLocalLlmModel').value = activeConfig.local_llm_model || '';
-            }
-            if (document.getElementById('cfgLocalLlmApiKey')) {
-                document.getElementById('cfgLocalLlmApiKey').value = activeConfig.local_llm_api_key || 'not-needed';
-            }
-            if (document.getElementById('cfgLocalLlmTimeout')) {
-                document.getElementById('cfgLocalLlmTimeout').value = activeConfig.local_llm_timeout_seconds ?? 120;
             }
 
             const capex = activeConfig.capex || {};
@@ -851,6 +852,15 @@
                 pcc_exempt_first_home: !!document.getElementById('cfgCapexPccExempt')?.checked
             };
 
+            const localBaseUrl = document.getElementById('cfgLocalBaseUrl')?.value?.trim() || document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || 'http://localhost:11434';
+            const localModel = document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b';
+            const localTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || 180;
+            const localTemp = parseFloat(document.getElementById('cfgLocalTemperature')?.value || document.getElementById('cfgOllamaTemperature')?.value) || 0.0;
+            const localCtx = parseInt(document.getElementById('cfgLocalNumCtx')?.value || document.getElementById('cfgOllamaNumCtx')?.value, 10) || 8192;
+            const localKey = document.getElementById('cfgLocalApiKey')?.value?.trim() || 'not-needed';
+            const localPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
+            const cloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || 30;
+
             const payload = {
                 profiles: allProfiles,
                 scrapers: scrapersPayload,
@@ -858,16 +868,20 @@
                 capex: capexPayload,
                 llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
                 llm_provider: document.getElementById('cfgLlmProvider')?.value || 'auto',
-                ollama_model: document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b',
-                ollama_base_url: document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || 'http://localhost:11434',
-                ollama_timeout_seconds: parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || 180,
-                ollama_temperature: parseFloat(document.getElementById('cfgOllamaTemperature')?.value) || 0.0,
-                ollama_num_ctx: parseInt(document.getElementById('cfgOllamaNumCtx')?.value, 10) || 8192,
-                openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro',
-                local_llm_base_url: document.getElementById('cfgLocalLlmBaseUrl')?.value?.trim() || 'http://localhost:1234/v1',
-                local_llm_model: document.getElementById('cfgLocalLlmModel')?.value?.trim() || '',
-                local_llm_api_key: document.getElementById('cfgLocalLlmApiKey')?.value?.trim() || 'not-needed',
-                local_llm_timeout_seconds: parseFloat(document.getElementById('cfgLocalLlmTimeout')?.value) || 120
+                local_llm_preset: localPreset,
+                local_llm_base_url: localBaseUrl,
+                local_llm_model: localModel,
+                local_llm_api_key: localKey,
+                local_llm_timeout_seconds: localTimeout,
+                local_llm_temperature: localTemp,
+                local_llm_num_ctx: localCtx,
+                cloud_llm_timeout_seconds: cloudTimeout,
+                ollama_model: localModel,
+                ollama_base_url: localBaseUrl,
+                ollama_timeout_seconds: localTimeout,
+                ollama_temperature: localTemp,
+                ollama_num_ctx: localCtx,
+                openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro'
             };
 
             try {
@@ -2515,36 +2529,70 @@
         function onLlmProviderChange(val) {
             const desc = document.getElementById('llmProviderDesc');
             if (!desc) return;
-            if (val === 'ollama') {
-                desc.textContent = 'Wymusza użycie lokalnego serwera Ollama na Twoim komputerze (bezpłatnie, 100% prywatności).';
-            } else if (val === 'local_openai') {
-                desc.textContent = 'Wymusza użycie lokalnego serwera OpenAI (LM Studio, vLLM, Docker Model Runner, LocalAI).';
+            if (val === 'local' || val === 'ollama' || val === 'local_openai') {
+                desc.textContent = 'Wymusza użycie lokalnego silnika AI (Ollama, LM Studio, vLLM, Docker Model Runner) na Twoim komputerze.';
             } else if (val === 'openrouter') {
                 desc.textContent = 'Wymusza użycie chmurowego OpenRouter (wymaga klucza OPENROUTER_API_KEY w .env).';
             } else if (val === 'openai') {
                 desc.textContent = 'Wymusza użycie oficjalnego OpenAI API (wymaga klucza OPENAI_API_KEY w .env).';
             } else {
-                desc.textContent = 'Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalny serwer i Ollamę.';
+                desc.textContent = 'Tryb automatyczny najpierw sprawdza chmurę (OpenRouter/OpenAI), a w razie braku — lokalny silnik.';
             }
         }
 
+        function setLocalEnginePreset(preset, updateUrl = true) {
+            const urlInput = document.getElementById('cfgLocalBaseUrl') || document.getElementById('cfgLocalLlmBaseUrl') || document.getElementById('cfgOllamaBaseUrl');
+            const hiddenPreset = document.getElementById('cfgLocalPreset');
+            const badge = document.getElementById('localPresetBadge');
+            if (hiddenPreset) hiddenPreset.value = preset;
+
+            const btns = {
+                ollama: document.getElementById('btnPresetOllama'),
+                lmstudio: document.getElementById('btnPresetLmStudio'),
+                vllm: document.getElementById('btnPresetVllm'),
+                docker: document.getElementById('btnPresetDocker')
+            };
+            Object.keys(btns).forEach(k => {
+                if (btns[k]) {
+                    if (k === preset) {
+                        btns[k].classList.add('btn-primary');
+                        btns[k].style.fontWeight = '600';
+                    } else {
+                        btns[k].classList.remove('btn-primary');
+                        btns[k].style.fontWeight = 'normal';
+                    }
+                }
+            });
+
+            const presetLabels = {
+                ollama: 'Ollama',
+                lmstudio: 'LM Studio',
+                vllm: 'vLLM',
+                docker: 'Docker / LocalAI'
+            };
+            if (badge && presetLabels[preset]) {
+                badge.textContent = 'Preset: ' + presetLabels[preset];
+            }
+
+            if (updateUrl && urlInput) {
+                if (preset === 'ollama') {
+                    urlInput.value = 'http://localhost:11434';
+                } else if (preset === 'lmstudio') {
+                    urlInput.value = 'http://localhost:1234/v1';
+                } else if (preset === 'vllm') {
+                    urlInput.value = 'http://localhost:8000/v1';
+                } else if (preset === 'docker') {
+                    urlInput.value = 'http://localhost:8080/v1';
+                }
+                showToast('Ustawiono adres silnika: ' + urlInput.value);
+            }
+        }
         function setLocalLlmPreset(preset) {
-            const urlInput = document.getElementById('cfgLocalLlmBaseUrl');
-            if (!urlInput) return;
-            if (preset === 'lmstudio') {
-                urlInput.value = 'http://localhost:1234/v1';
-            } else if (preset === 'vllm') {
-                urlInput.value = 'http://localhost:8000/v1';
-            } else if (preset === 'docker') {
-                urlInput.value = 'http://localhost:8080/v1';
-            } else if (preset === 'ollama_v1') {
-                urlInput.value = 'http://localhost:11434/v1';
-            }
-            showToast('Ustawiono adres serwera: ' + urlInput.value);
+            setLocalEnginePreset(preset, true);
         }
 
-        function onOllamaSelectChange(val) {
-            const inp = document.getElementById('cfgOllamaModel');
+        function onLocalModelSelectChange(val) {
+            const inp = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
             if (!inp) return;
             if (val !== 'custom') {
                 inp.value = val;
@@ -2553,9 +2601,10 @@
                 inp.select();
             }
         }
+        function onOllamaSelectChange(val) { onLocalModelSelectChange(val); }
 
-        function onOllamaInputCustom(val) {
-            const sel = document.getElementById('cfgOllamaModelSelect');
+        function onLocalModelInputCustom(val) {
+            const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
             const v = (val || '').trim();
             let found = false;
@@ -2570,9 +2619,10 @@
                 sel.value = 'custom';
             }
         }
+        function onOllamaInputCustom(val) { onLocalModelInputCustom(val); }
 
-        function syncOllamaSelectWithInput(modelName) {
-            const sel = document.getElementById('cfgOllamaModelSelect');
+        function syncLocalModelSelectWithInput(modelName) {
+            const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
             const v = (modelName || '').trim();
             let found = false;
@@ -2587,14 +2637,16 @@
                 sel.value = 'custom';
             }
         }
+        function syncOllamaSelectWithInput(modelName) { syncLocalModelSelectWithInput(modelName); }
 
-        function setOllamaModelChip(modelName) {
-            const input = document.getElementById('cfgOllamaModel');
+        function setLocalModelChip(modelName) {
+            const input = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
             if (input) {
                 input.value = modelName;
             }
-            syncOllamaSelectWithInput(modelName);
+            syncLocalModelSelectWithInput(modelName);
         }
+        function setOllamaModelChip(modelName) { setLocalModelChip(modelName); }
 
         function setOpenRouterModelChip(modelName) {
             const input = document.getElementById('cfgOpenRouterModel');
@@ -2603,21 +2655,22 @@
             }
         }
 
-        function updateOllamaSelectOptions(installedModels, currentVal) {
-            const sel = document.getElementById('cfgOllamaModelSelect');
+        function updateLocalModelSelectOptions(installedModels, currentVal) {
+            const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
             const defaults = ['qwen2.5:7b', 'bielik:11b-v2.3-instruct', 'qwen2.5:14b', 'llama3.1:8b', 'llama3.2:3b'];
             const allModels = Array.from(new Set([...(installedModels || []), ...defaults]));
-            const cur = currentVal || document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b';
+            const cur = currentVal || document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b';
             let html = allModels.map(m => {
                 const isInst = (installedModels || []).includes(m);
-                const tag = isInst ? ' (pobrany)' : '';
+                const tag = isInst ? ' (wykryty)' : '';
                 return `<option value="${escapeHtml(m)}">${escapeHtml(m)}${tag}</option>`;
             }).join('');
             html += '<option value="custom">Inny / wpisany ręcznie...</option>';
             sel.innerHTML = html;
-            syncOllamaSelectWithInput(cur);
+            syncLocalModelSelectWithInput(cur);
         }
+        function updateOllamaSelectOptions(installedModels, currentVal) { updateLocalModelSelectOptions(installedModels, currentVal); }
 
         function checkLlmStatusIfEmpty() {
             if (!lastLlmStatusData && !isTestingLlm) {
@@ -2632,36 +2685,39 @@
             const btn = document.getElementById('btnTestLlm');
             const label = document.getElementById('btnTestLlmLabel');
             const container = document.getElementById('llmStatusContainer');
-            const ollamaModelInput = document.getElementById('cfgOllamaModel');
-            const requestedModel = ollamaModelInput ? ollamaModelInput.value.trim() : null;
+            const localModelInput = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
+            const requestedModel = localModelInput ? localModelInput.value.trim() : null;
+            const requestedLocalUrl = document.getElementById('cfgLocalBaseUrl')?.value?.trim() || document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || null;
+            const requestedLocalTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || null;
+            const requestedLocalTemp = parseFloat(document.getElementById('cfgLocalTemperature')?.value || document.getElementById('cfgOllamaTemperature')?.value) ?? null;
+            const requestedLocalCtx = parseInt(document.getElementById('cfgLocalNumCtx')?.value || document.getElementById('cfgOllamaNumCtx')?.value, 10) || null;
+            const requestedLocalKey = document.getElementById('cfgLocalApiKey')?.value?.trim() || null;
+            const requestedLocalPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
+            const requestedCloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || null;
             const requestedOpenRouter = document.getElementById('cfgOpenRouterModel')?.value?.trim() || null;
             const requestedProvider = document.getElementById('cfgLlmProvider')?.value || null;
-            const requestedOllamaUrl = document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || null;
-            const requestedOllamaTimeout = parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || null;
-            const requestedOllamaTemp = parseFloat(document.getElementById('cfgOllamaTemperature')?.value) ?? null;
-            const requestedOllamaCtx = parseInt(document.getElementById('cfgOllamaNumCtx')?.value, 10) || null;
-            const requestedLocalUrl = document.getElementById('cfgLocalLlmBaseUrl')?.value?.trim() || null;
-            const requestedLocalModel = document.getElementById('cfgLocalLlmModel')?.value?.trim() || null;
-            const requestedLocalKey = document.getElementById('cfgLocalLlmApiKey')?.value?.trim() || null;
-            const requestedLocalTimeout = parseFloat(document.getElementById('cfgLocalLlmTimeout')?.value) || null;
 
             if (btn) btn.disabled = true;
             if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
             if (container && !isAuto) {
-                container.innerHTML = '<div class="llm-diag-placeholder"><span class="spinner-inline"></span> Sprawdzanie połączeń z OpenRouter, OpenAI, lokalnym serwerem i Ollama...</div>';
+                container.innerHTML = '<div class="llm-diag-placeholder"><span class="spinner-inline"></span> Sprawdzanie połączeń z chmurą (OpenRouter, OpenAI) oraz silnikiem lokalnym...</div>';
             }
 
             try {
                 const data = await Transport.testLlm({
-                    ollama_model: requestedModel,
-                    ollama_base_url: requestedOllamaUrl,
-                    ollama_timeout_seconds: requestedOllamaTimeout,
-                    ollama_temperature: requestedOllamaTemp,
-                    ollama_num_ctx: requestedOllamaCtx,
+                    local_llm_preset: requestedLocalPreset,
                     local_llm_base_url: requestedLocalUrl,
-                    local_llm_model: requestedLocalModel,
+                    local_llm_model: requestedModel,
                     local_llm_api_key: requestedLocalKey,
                     local_llm_timeout_seconds: requestedLocalTimeout,
+                    local_llm_temperature: requestedLocalTemp,
+                    local_llm_num_ctx: requestedLocalCtx,
+                    cloud_llm_timeout_seconds: requestedCloudTimeout,
+                    ollama_model: requestedModel,
+                    ollama_base_url: requestedLocalUrl,
+                    ollama_timeout_seconds: requestedLocalTimeout,
+                    ollama_temperature: requestedLocalTemp,
+                    ollama_num_ctx: requestedLocalCtx,
                     openrouter_model: requestedOpenRouter,
                     llm_provider: requestedProvider
                 });
@@ -2695,9 +2751,13 @@
             const ol = p.ollama || {};
             const loc = p.local_openai || {};
 
-            // Dynamically refresh the Ollama select with detected installed models
-            if (ol.installed_models) {
-                updateOllamaSelectOptions(ol.installed_models, document.getElementById('cfgOllamaModel')?.value?.trim());
+            // Dynamically refresh the select with detected installed models
+            const detectedModels = [
+                ...(ol.installed_models || []),
+                ...(loc.installed_models || [])
+            ];
+            if (detectedModels.length > 0) {
+                updateLocalModelSelectOptions(detectedModels, document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim());
             }
 
             // Update OpenRouter key notice
@@ -2723,7 +2783,7 @@
                 bannerHtml = `
                     <div class="llm-active-banner status-err">
                         <span>🔴 <strong>Brak gotowego dostawcy AI:</strong> Skonfigurowany dostawca nie odpowiada</span>
-                        <span style="font-size:11px;opacity:0.9;">Sprawdź klucz API lub uruchom Ollama</span>
+                        <span style="font-size:11px;opacity:0.9;">Sprawdź klucz API lub uruchom silnik lokalny</span>
                     </div>
                 `;
             }
@@ -2787,7 +2847,7 @@
                                 💡 ${escapeHtml(hw.recommendation_reason || '')}
                             </div>
                         </div>
-                        <button type="button" class="btn btn-sm btn-ghost" onclick="setOllamaModelChip('${escapeHtml(hw.recommended_model || 'qwen2.5:7b')}')" style="font-size:11px;white-space:nowrap;">
+                        <button type="button" class="btn btn-sm btn-ghost" onclick="setLocalModelChip('${escapeHtml(hw.recommended_model || 'qwen2.5:7b')}')" style="font-size:11px;white-space:nowrap;">
                             Wybierz: ${escapeHtml(hw.recommended_model || 'qwen2.5:7b')}
                         </button>
                     </div>
@@ -2798,9 +2858,9 @@
             if (ol.installed_models && ol.installed_models.length > 0) {
                 installedChips = `
                     <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
-                        Pobrane modele lokalne (kliknij, aby wybrać do konfiguracji):
+                        Pobrane modele Ollama (kliknij, aby wybrać do konfiguracji):
                         <div class="llm-models-tags">
-                            ${ol.installed_models.map(m => `<span class="llm-model-tag" onclick="setOllamaModelChip('${escapeHtml(m)}')">${escapeHtml(m)}</span>`).join('')}
+                            ${ol.installed_models.map(m => `<span class="llm-model-tag" onclick="setLocalModelChip('${escapeHtml(m)}')">${escapeHtml(m)}</span>`).join('')}
                         </div>
                     </div>
                 `;
@@ -2823,7 +2883,7 @@
                     <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
                         Wykryte modele na serwerze (kliknij, aby wybrać do konfiguracji):
                         <div class="llm-models-tags">
-                            ${loc.installed_models.map(m => `<span class="llm-model-tag" onclick="document.getElementById('cfgLocalLlmModel').value='${escapeHtml(m)}'">${escapeHtml(m)}</span>`).join('')}
+                            ${loc.installed_models.map(m => `<span class="llm-model-tag" onclick="setLocalModelChip('${escapeHtml(m)}')">${escapeHtml(m)}</span>`).join('')}
                         </div>
                     </div>
                 `;

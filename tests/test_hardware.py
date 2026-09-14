@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -269,3 +270,105 @@ async def test_local_openai_connection_and_routing() -> None:
         result = await analyzer.analyze_description(dummy_listing)
         assert result == mock_completion_result
         assert mock_call.called
+
+
+def test_unified_local_and_cloud_config_roundtrip() -> None:
+    # Test setting local_llm_* updates ollama_* and vice versa
+    updated = config_manager.update_config(
+        {
+            "local_llm_preset": "vllm",
+            "local_llm_base_url": "http://localhost:8000/v1",
+            "local_llm_model": "qwen2.5:14b",
+            "local_llm_timeout_seconds": 210.0,
+            "local_llm_num_ctx": 16384,
+            "cloud_llm_timeout_seconds": 45.0,
+        }
+    )
+    assert updated.local_llm_preset == "vllm"
+    assert updated.local_llm_base_url == "http://localhost:8000/v1"
+    assert updated.local_llm_model == "qwen2.5:14b"
+    assert updated.local_llm_timeout_seconds == 210.0
+    assert updated.local_llm_num_ctx == 16384
+    assert updated.cloud_llm_timeout_seconds == 45.0
+
+    # Synchronization with ollama_*
+    assert updated.ollama_model == "qwen2.5:14b"
+    assert updated.ollama_timeout_seconds == 210.0
+    assert updated.ollama_num_ctx == 16384
+
+    # Test setting ollama_* also syncs to local_llm_*
+    updated2 = config_manager.update_config(
+        {
+            "ollama_model": "bielik:11b-v2.3-instruct",
+            "ollama_timeout_seconds": 150.0,
+        }
+    )
+    assert updated2.ollama_model == "bielik:11b-v2.3-instruct"
+    assert updated2.local_llm_model == "bielik:11b-v2.3-instruct"
+    assert updated2.local_llm_timeout_seconds == 150.0
+
+    # Reset
+    config_manager.update_config(
+        {
+            "local_llm_preset": "ollama",
+            "local_llm_base_url": "http://localhost:11434",
+            "local_llm_model": "qwen2.5:7b",
+            "local_llm_timeout_seconds": 180.0,
+            "local_llm_num_ctx": 8192,
+            "cloud_llm_timeout_seconds": 30.0,
+            "ollama_model": "qwen2.5:7b",
+            "ollama_base_url": "http://localhost:11434",
+            "ollama_timeout_seconds": 180.0,
+            "ollama_num_ctx": 8192,
+        }
+    )
+
+
+@pytest.mark.asyncio
+async def test_cloud_llm_timeout_applied_to_httpx(monkeypatch: pytest.MonkeyPatch) -> None:
+    from config import settings
+    from src.models.enums import FinishCondition, PropertyCategory
+    from src.models.listing import ListingSchema
+
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+
+    analyzer = LLMAnalyzer(
+        enabled=True,
+        llm_provider="openrouter",
+        cloud_llm_timeout_seconds=42.0,
+    )
+    assert analyzer.cloud_llm_timeout_seconds == 42.0
+
+    dummy_listing = ListingSchema(
+        id="test-cloud-timeout",
+        portal="Otodom",
+        title="Dom wolnostojący",
+        price=950000,
+        price_per_m2=7000,
+        area_home=135,
+        location_raw="Kraków",
+        category=PropertyCategory.DOM,
+        finish_condition=FinishCondition.DO_ZAMIESZKANIA,
+        url="https://otodom.pl/test-cloud-timeout",
+        raw_description="Kompletnie umeblowany i gotowy.",
+    )
+
+    captured_timeout = None
+
+    class DummyOpenAI:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            nonlocal captured_timeout
+            captured_timeout = kwargs.get("timeout")
+            self.chat = MagicMock()
+            mock_choice = MagicMock()
+            mock_choice.message.content = (
+                '{"finish_condition": "do zamieszkania", "worth_interest": true, "summary": "Super"}'
+            )
+            mock_response = MagicMock(choices=[mock_choice])
+            self.chat.completions.create = AsyncMock(return_value=mock_response)
+
+    with patch("openai.AsyncOpenAI", side_effect=DummyOpenAI):
+        res = await analyzer._call_openrouter("test prompt", dummy_listing)
+        assert res is not None
+        assert res["finish_condition"] == "do zamieszkania"
+        assert captured_timeout == 42.0

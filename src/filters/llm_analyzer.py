@@ -133,6 +133,9 @@ class LLMAnalyzer:
         local_llm_api_key: str | None = None,
         local_llm_temperature: float | None = None,
         local_llm_timeout_seconds: float | None = None,
+        local_llm_preset: str | None = None,
+        local_llm_num_ctx: int | None = None,
+        cloud_llm_timeout_seconds: float | None = None,
     ) -> None:
         cfg = None
         try:
@@ -156,50 +159,82 @@ class LLMAnalyzer:
         self.openai_key = settings.OPENAI_API_KEY
         self.openai_model = settings.OPENAI_MODEL
         self.openai_base_url = settings.OPENAI_BASE_URL
+        self.cloud_llm_timeout_seconds = float(
+            cloud_llm_timeout_seconds or (getattr(cfg, "cloud_llm_timeout_seconds", None) if cfg else None) or 30.0
+        )
+        self.local_llm_preset = (
+            str(local_llm_preset or (getattr(cfg, "local_llm_preset", None) if cfg else None) or "ollama")
+            .lower()
+            .strip()
+        )
+
         raw_ollama_url = (
-            ollama_base_url or (getattr(cfg, "ollama_base_url", None) if cfg else None) or settings.OLLAMA_BASE_URL
+            ollama_base_url
+            or local_llm_base_url
+            or (getattr(cfg, "ollama_base_url", None) if cfg else None)
+            or (getattr(cfg, "local_llm_base_url", None) if cfg else None)
+            or settings.OLLAMA_BASE_URL
         )
         self.ollama_url = self._resolve_default_ollama_url(raw_ollama_url)
         self.ollama_timeout_seconds = float(
-            ollama_timeout_seconds or (getattr(cfg, "ollama_timeout_seconds", None) if cfg else None) or 180.0
+            ollama_timeout_seconds
+            or local_llm_timeout_seconds
+            or (getattr(cfg, "ollama_timeout_seconds", None) if cfg else None)
+            or (getattr(cfg, "local_llm_timeout_seconds", None) if cfg else None)
+            or 180.0
         )
         self.ollama_model = (
-            ollama_model or (getattr(cfg, "ollama_model", None) if cfg else None) or settings.OLLAMA_MODEL
+            ollama_model
+            or local_llm_model
+            or (getattr(cfg, "ollama_model", None) if cfg else None)
+            or (getattr(cfg, "local_llm_model", None) if cfg else None)
+            or settings.OLLAMA_MODEL
         )
         self.ollama_temperature = float(
             ollama_temperature
             if ollama_temperature is not None
-            else (getattr(cfg, "ollama_temperature", None) if cfg else None) or 0.0
+            else (
+                local_llm_temperature
+                if local_llm_temperature is not None
+                else ((getattr(cfg, "ollama_temperature", None) if cfg else None) or 0.0)
+            )
         )
         self.ollama_num_ctx = int(
             ollama_num_ctx
             if ollama_num_ctx is not None
-            else (getattr(cfg, "ollama_num_ctx", None) if cfg else None) or 8192
+            else (
+                local_llm_num_ctx
+                if local_llm_num_ctx is not None
+                else (
+                    (getattr(cfg, "ollama_num_ctx", None) if cfg else None)
+                    or (getattr(cfg, "local_llm_num_ctx", None) if cfg else None)
+                    or 8192
+                )
+            )
         )
         raw_local_url = (
             local_llm_base_url
+            or ollama_base_url
             or (getattr(cfg, "local_llm_base_url", None) if cfg else None)
-            or "http://localhost:1234/v1"
+            or (getattr(cfg, "ollama_base_url", None) if cfg else None)
+            or "http://localhost:11434"
         )
         self.local_llm_base_url = self._resolve_default_ollama_url(raw_local_url)
         self.local_llm_model = (
             local_llm_model
-            if local_llm_model is not None
-            else ((getattr(cfg, "local_llm_model", None) if cfg else None) or "")
+            or ollama_model
+            or (getattr(cfg, "local_llm_model", None) if cfg else None)
+            or (getattr(cfg, "ollama_model", None) if cfg else None)
+            or ""
         ).strip()
         self.local_llm_api_key = (
             local_llm_api_key
             if local_llm_api_key is not None
             else ((getattr(cfg, "local_llm_api_key", None) if cfg else None) or "not-needed")
         ).strip()
-        self.local_llm_temperature = float(
-            local_llm_temperature
-            if local_llm_temperature is not None
-            else (getattr(cfg, "local_llm_temperature", None) if cfg else None) or 0.0
-        )
-        self.local_llm_timeout_seconds = float(
-            local_llm_timeout_seconds or (getattr(cfg, "local_llm_timeout_seconds", None) if cfg else None) or 120.0
-        )
+        self.local_llm_temperature = self.ollama_temperature
+        self.local_llm_timeout_seconds = self.ollama_timeout_seconds
+        self.local_llm_num_ctx = self.ollama_num_ctx
         self.llm_provider = (
             (llm_provider or (getattr(cfg, "llm_provider", None) if cfg else None) or "auto").lower().strip()
         )
@@ -651,7 +686,7 @@ class LLMAnalyzer:
             client = AsyncOpenAI(
                 api_key=self.openrouter_key,
                 base_url="https://openrouter.ai/api/v1",
-                timeout=15.0,
+                timeout=self.cloud_llm_timeout_seconds,
                 default_headers={
                     "HTTP-Referer": "https://github.com/p-sternik/Universal-Real-Estate-Hunter",
                     "X-Title": "Universal Real Estate Hunter",
@@ -690,7 +725,7 @@ class LLMAnalyzer:
             client = AsyncOpenAI(
                 api_key=self.openai_key,
                 base_url=self.openai_base_url,
-                timeout=15.0,
+                timeout=self.cloud_llm_timeout_seconds,
             )
             response = await _chat_completion_with_retry(
                 client,
