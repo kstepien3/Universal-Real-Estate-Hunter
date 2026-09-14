@@ -6,6 +6,41 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.10.0 (2026-09-14)
+
+### Bug Fixes
+
+- **air-quality**: Fetch all GIOŚ stations nationwide with pagination size=500 instead of default 20
+  ([`c68aa19`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/c68aa192086bfe6571735d81391dfd7e2b6bc15d))
+
+- **db**: Add schema migrations for PostgreSQL and improve dashboard loading state
+  ([`f31885d`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/f31885dc2063a75cff293236c17937c44899b7ac))
+
+- **db**: Handle duplicate keys gracefully with session.merge during sqlite to postgres migration
+  ([`39fe7d3`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/39fe7d3b6843fe35d0aa39851501299ce8b385e4))
+
+- **db**: Use DateTime(timezone=True) and TIMESTAMPTZ for asyncpg PostgreSQL compatibility
+  ([`fc7d989`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/fc7d989b2396cee197f69cb8d49e63b9dd7f143b))
+
+### Code Style
+
+- Apply pre-commit formatters and linters (ruff, mypy)
+  ([`a16cc8d`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/a16cc8d8f4f1951bb5f481c1e2a27857218d9dcf))
+
+### Features
+
+- Generalize from Rzeszów to nationwide multi-city support
+  ([`b5977c1`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/b5977c1cdb42652a640fa6435ac86cc95cde9c00))
+
+- **air-quality**: Implement air quality & smog risk intelligence (CAMS + GIOŚ)
+  ([`f6ac130`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/f6ac1304eb429be1949c22eb01e9f6de01ea27ca))
+
+### Refactoring
+
+- Trim dead compatibility wrapper and shrink test closures
+  ([`0e90254`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/0e902549e1869d62c16371fc23c0c419dc4b09ee))
+
+
 ## v1.9.3 (2026-09-11)
 
 ### Bug Fixes
