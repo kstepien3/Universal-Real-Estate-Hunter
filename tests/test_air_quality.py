@@ -131,9 +131,7 @@ async def test_get_air_quality_audit_mocked():
 
     mock_gios_idx_resp = MagicMock()
     mock_gios_idx_resp.status_code = 200
-    mock_gios_idx_resp.json.return_value = {
-        "AqIndex": {"Nazwa kategorii indeksu": "Dobry"}
-    }
+    mock_gios_idx_resp.json.return_value = {"AqIndex": {"Nazwa kategorii indeksu": "Dobry"}}
 
     async def mock_get(url: str, **kwargs: Any) -> Any:
         if "air-quality-api" in url:
@@ -245,7 +243,9 @@ class AirQualityDashboardApiTest(AioHTTPTestCase):
             ],
         }
 
-        with patch("src.services.air_quality.air_quality_service.get_air_quality_audit", AsyncMock(return_value=mock_audit)):
+        with patch(
+            "src.services.air_quality.air_quality_service.get_air_quality_audit", AsyncMock(return_value=mock_audit)
+        ):
             resp = await self.client.get(f"/api/listings/{listing_id}/air-quality")
             assert resp.status == 200
             data = await resp.json()

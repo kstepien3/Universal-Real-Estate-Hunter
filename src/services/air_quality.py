@@ -196,9 +196,7 @@ class AirQualityService:
                 best_station = s
         return best_station, round(min_dist, 1)
 
-    async def get_gios_station_index(
-        self, client: httpx.AsyncClient, station_id: int
-    ) -> dict[str, Any]:
+    async def get_gios_station_index(self, client: httpx.AsyncClient, station_id: int) -> dict[str, Any]:
         """Fetches current GIOŚ index for a given station."""
         cache_key = f"gios:index:{station_id}"
         cached = await self._get_cached(cache_key)
@@ -317,9 +315,7 @@ class AirQualityService:
 
         return heating_avg, summer_avg, smog_days_total, monthly_list
 
-    async def get_air_quality_audit(
-        self, lat: float, lon: float, force_refresh: bool = False
-    ) -> dict[str, Any]:
+    async def get_air_quality_audit(self, lat: float, lon: float, force_refresh: bool = False) -> dict[str, Any]:
         """
         Executes a full air quality audit for given coordinates.
         Utilizes cache (SpatialCacheModel) rounded to 2 decimal places (~1.1 km).
