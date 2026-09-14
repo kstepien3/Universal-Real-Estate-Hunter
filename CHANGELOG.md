@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.10.1 (2026-09-14)
+
+### Bug Fixes
+
+- **commute**: Stop fabricating a city-center anchor for unknown cities
+  ([`20dade4`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/20dade426524545bb5a8279633c4caf3d16da082))
+
+
 ## v1.10.0 (2026-09-14)
 
 ### Bug Fixes
