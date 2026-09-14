@@ -67,8 +67,8 @@ def analyze_negotiation(
     Synthesizes property characteristics, market median, price history,
     and spatial defects into concrete negotiation advice.
     """
-    # 1. Days on market
-    created_at = _prop(listing, "created_at", None)
+    # 1. Days on market (uses first_seen_at when available to reflect true cumulative exposure)
+    created_at = _prop(listing, "first_seen_at", None) or _prop(listing, "created_at", None)
     if isinstance(created_at, datetime):
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=UTC)
@@ -237,6 +237,13 @@ def analyze_negotiation(
     if broadband in ("BRAK", "BRAK_ZASIĘGU"):
         leverage_points += 1
 
+    relist_count = int(_prop(listing, "relist_count", 0) or 0)
+    initial_price = _prop(listing, "initial_price", None)
+    if relist_count > 0:
+        leverage_points += 3
+    if days_on_market >= 90:
+        leverage_points += 2
+
     if leverage_points >= 4:
         negotiation_leverage = "WYSOKA"
     elif leverage_points >= 2:
@@ -247,7 +254,26 @@ def analyze_negotiation(
     # 6. Hard Negotiation Arguments
     arguments: list[str] = []
 
-    if days_on_market >= 45:
+    if relist_count > 0:
+        curr_price = float(_prop(listing, "price", 0.0) or 0.0)
+        init_p = float(initial_price) if initial_price else None
+        if init_p and init_p > curr_price:
+            total_drop = init_p - curr_price
+            drop_pct = (total_drop / init_p) * 100.0
+            init_str = f"{init_p:,.0f}".replace(",", " ")
+            drop_str = f"{total_drop:,.0f}".replace(",", " ")
+            arguments.append(
+                f"Wykryto pozorny re-listing ({relist_count}x): oferta na rynku łącznie {days_on_market} dni, "
+                f"pierwotna cena: {init_str} zł (spadek o {drop_str} zł / -{drop_pct:.1f}%). "
+                "Sprzedający jest pod silną presją czasu."
+            )
+        else:
+            arguments.append(
+                f"Wykryto re-listing ({relist_count}x): oferta była już wcześniej wycofywana z portalu "
+                f"(łącznie {days_on_market} dni na rynku)."
+            )
+
+    if days_on_market >= 45 and relist_count == 0:
         arguments.append(f"Oferta znajduje się na rynku od {days_on_market} dni bez sprzedaży (presja czasowa).")
 
     if price_drop_amount > 0:

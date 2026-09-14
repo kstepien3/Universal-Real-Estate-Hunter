@@ -15,7 +15,13 @@ from src.models.enums import (
 )
 from src.models.listing import FilterResult, ListingSchema
 
-from .fingerprint import compute_desc_hash, estimate_llm_tokens, extract_street_token, generate_property_fingerprint
+from .fingerprint import (
+    compute_desc_hash,
+    estimate_llm_tokens,
+    extract_street_token,
+    generate_physical_fingerprint,
+    generate_property_fingerprint,
+)
 from .llm_analyzer import PROMPT_VERSION, LLMAnalyzer, estimate_tokens, load_prompt_template
 from .stage1_hard_rules import Stage1Filter
 from .stage2_semantic import Stage2SemanticFilter
@@ -855,6 +861,7 @@ __all__ = [
     "LLMAnalyzer",
     "QualificationEngine",
     "generate_property_fingerprint",
+    "generate_physical_fingerprint",
     "extract_street_token",
     "compute_desc_hash",
     "estimate_llm_tokens",

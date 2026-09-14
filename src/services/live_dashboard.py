@@ -529,10 +529,14 @@ class LiveDashboardServer:
                         "ai_questions": item.ai_questions,
                         "contact_phone": item.contact_phone,
                         "contact_person": item.contact_person,
+                        # Re-listing & Lifecycle
+                        "listing_status": getattr(item, "listing_status", None) or "ACTIVE",
+                        "relist_count": getattr(item, "relist_count", 0) or 0,
+                        "first_seen_at": item.first_seen_at.isoformat() if item.first_seen_at is not None else None,
                         # Price Drop History
                         "price_drop_amount": price_drop_amount,
                         "price_drop_pct": price_drop_pct,
-                        "initial_price": initial_price,
+                        "initial_price": getattr(item, "initial_price", None) or initial_price,
                         "price_history_count": len(ph),
                         # Negotiation & Market Intelligence & Automated Audits
                         **valuation.to_dashboard_dict(),

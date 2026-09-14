@@ -1,5 +1,5 @@
 import asyncio
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -144,6 +144,28 @@ class DiscordNotifier:
                 "inline": False,
             },
         ]
+
+        if getattr(listing, "relist_count", 0) > 0:
+            relist_drop = ""
+            init_p = getattr(listing, "initial_price", None)
+            if init_p and init_p > listing.price:
+                diff = init_p - listing.price
+                pct = (diff / init_p) * 100
+                relist_drop = f"\n📉 Pierwotnie: **{init_p:,.0f} zł** (spadek o **{diff:,.0f} zł** / -{pct:.1f}%)"
+            days_txt = ""
+            first_seen = getattr(listing, "first_seen_at", None)
+            if first_seen:
+                fs_utc = first_seen.replace(tzinfo=UTC) if first_seen.tzinfo is None else first_seen
+                days = max(1, (datetime.now(UTC) - fs_utc).days)
+                days_txt = f" | Łącznie na rynku: **{days} dni**"
+            fields.insert(
+                0,
+                {
+                    "name": "🔁 WYKRYTO POZORNY RE-LISTING",
+                    "value": f"Nieruchomość powraca na rynek ({listing.relist_count}x){days_txt}{relist_drop}\n⚠️ *Sprzedający pod silną presją czasu i negocjacji!*",
+                    "inline": False,
+                },
+            )
 
         parcel_id = getattr(listing, "parcel_id", None)
         if getattr(listing, "geoportal_url", None) and parcel_id:

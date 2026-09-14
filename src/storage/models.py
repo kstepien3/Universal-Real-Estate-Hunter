@@ -26,6 +26,11 @@ class ListingModel(Base):
     portal_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True, index=True)
     property_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    physical_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    listing_status: Mapped[str] = mapped_column(String(30), default="ACTIVE", index=True)
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    initial_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    relist_count: Mapped[int] = mapped_column(Integer, default=0)
 
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
