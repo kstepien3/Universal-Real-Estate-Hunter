@@ -370,11 +370,6 @@ async def _migrate_database_columns(conn) -> None:
     await conn.run_sync(_do_migrate)
 
 
-async def _migrate_sqlite_columns(conn) -> None:
-    """Backwards compatibility wrapper for _migrate_database_columns."""
-    await _migrate_database_columns(conn)
-
-
 async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
     """If target DB is PostgreSQL and empty, automatically migrates data from existing SQLite DB if found."""
     # Find candidate SQLite file locations

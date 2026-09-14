@@ -485,12 +485,9 @@ async def test_migrate_database_columns_sqlite(tmp_path):
 
     # Verify that new columns were added
     async with engine.connect() as aconn:
-
-        def _check_cols(sync_conn):
-            res = sync_conn.execute(text("PRAGMA table_info(listings)")).fetchall()
-            return {row[1] for row in res}
-
-        cols = await aconn.run_sync(_check_cols)
+        cols = await aconn.run_sync(
+            lambda sc: {r[1] for r in sc.execute(text("PRAGMA table_info(listings)")).fetchall()}
+        )
         assert "air_aqi" in cols
         assert "air_aqi_label" in cols
         assert "air_pm25_heating_avg" in cols
@@ -505,7 +502,7 @@ async def test_migrate_database_columns_sqlite(tmp_path):
 @pytest.mark.asyncio
 async def test_migrate_database_columns_postgres_simulation():
     """Test that _migrate_database_columns generates ALTER TABLE IF NOT EXISTS on postgres dialect."""
-    from unittest.mock import MagicMock
+    from unittest.mock import AsyncMock, MagicMock
 
     from src.storage.database import _migrate_database_columns
 
@@ -528,11 +525,7 @@ async def test_migrate_database_columns_postgres_simulation():
     mock_conn.execute = mock_execute
 
     async_conn_mock = MagicMock()
-
-    async def fake_run_sync(fn):
-        return fn(mock_conn)
-
-    async_conn_mock.run_sync = fake_run_sync
+    async_conn_mock.run_sync = AsyncMock(side_effect=lambda fn: fn(mock_conn))
 
     await _migrate_database_columns(async_conn_mock)
 
