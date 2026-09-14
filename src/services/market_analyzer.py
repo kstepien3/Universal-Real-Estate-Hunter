@@ -599,30 +599,28 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
     flat = float(lat)
     flon = float(lon)
 
-    # 1. Resolve Target City Center
+    # 1. Resolve Target City Center (never fabricate a centroid for an unknown city)
     from src.services.config_manager import CITY_CENTROIDS, slugify_city
 
     city_slug = slugify_city(city) if city else ""
+    city_center_coords: tuple[float, float] | None = None
+    city_display: str | None = None
     if city_slug in CITY_CENTROIDS:
         city_center_coords = CITY_CENTROIDS[city_slug]
         city_display = city
     else:
-        combined_loc = f"{city} {district} {_prop(listing, 'location_raw', '')}"
+        combined_slug = slugify_city(f"{city} {district} {_prop(listing, 'location_raw', '')}")
         for c_slug, coords in CITY_CENTROIDS.items():
-            if c_slug in slugify_city(combined_loc):
+            if re.search(rf"\b{c_slug}\b", combined_slug):
                 city_center_coords = coords
                 city_display = c_slug.capitalize()
                 break
-        else:
-            closest_slug, closest_coords = min(
-                CITY_CENTROIDS.items(),
-                key=lambda item: haversine_km(flat, flon, item[1][0], item[1][1]),
-            )
-            city_center_coords = closest_coords
-            city_display = closest_slug.capitalize()
 
-    dist_center = haversine_km(flat, flon, city_center_coords[0], city_center_coords[1])
-    commute_min = max(5, round(dist_center * 1.5 + 4))
+    dist_center: float | None = None
+    commute_min: int | None = None
+    if city_center_coords is not None:
+        dist_center = haversine_km(flat, flon, city_center_coords[0], city_center_coords[1])
+        commute_min = max(5, round(dist_center * 1.5 + 4))
 
     nearest_pka_name: str | None = None
     nearest_pka_dist: float | None = None
@@ -644,34 +642,44 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
 
     # Center
-    center_label = f"Centrum ({city_display})" if city_display else "Centrum"
-    if dist_center <= 5.0:
+    if dist_center is None:
         findings.append(
             {
-                "badge": "🏙️ Blisko Centrum",
-                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
-                "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów.",
-                "severity": "success",
-            }
-        )
-    elif dist_center <= 12.0:
-        findings.append(
-            {
-                "badge": "🚗 Strefa Podmiejska",
-                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
-                "desc": "Standardowy czas dojazdu w aglomeracji miejskiej. Dogodne połączenie drogowe.",
+                "badge": "📍 Nieznane miasto",
+                "title": "Brak punktu odniesienia dojazdu",
+                "desc": "Nie rozpoznano miasta oferty — nie wyliczono odległości do centrum, aby nie wprowadzać w błąd.",
                 "severity": "info",
             }
         )
     else:
-        findings.append(
-            {
-                "badge": "⏱️ Dłuższy Dojazd",
-                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
-                "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem.",
-                "severity": "warning",
-            }
-        )
+        center_label = f"Centrum ({city_display})"
+        if dist_center <= 5.0:
+            findings.append(
+                {
+                    "badge": "🏙️ Blisko Centrum",
+                    "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
+                    "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów.",
+                    "severity": "success",
+                }
+            )
+        elif dist_center <= 12.0:
+            findings.append(
+                {
+                    "badge": "🚗 Strefa Podmiejska",
+                    "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
+                    "desc": "Standardowy czas dojazdu w aglomeracji miejskiej. Dogodne połączenie drogowe.",
+                    "severity": "info",
+                }
+            )
+        else:
+            findings.append(
+                {
+                    "badge": "⏱️ Dłuższy Dojazd",
+                    "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
+                    "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem.",
+                    "severity": "warning",
+                }
+            )
 
     # Rail / Aglomeracja
     if nearest_pka_dist is not None and nearest_pka_name is not None:
@@ -725,7 +733,10 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
                 }
             )
 
-    if nearest_pka_dist is not None:
+    if dist_center is None:
+        commute_verdict = "BRAK PUNKTU ODNIESIENIA DOJAZDU"
+        commute_sev = "info"
+    elif nearest_pka_dist is not None:
         if dist_center <= 6.0 and nearest_pka_dist <= 2.0:
             commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
             commute_sev = "success"

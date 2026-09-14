@@ -434,6 +434,57 @@ def test_calculate_commute_audit_without_coords():
     assert commute["dist_center_km"] is None
 
 
+def test_calculate_commute_audit_unknown_city_no_reference():
+    # City outside CITY_CENTROIDS with no recognizable location text must not
+    # fabricate a centroid (previously fell back to the nearest known city).
+    listing = {
+        "latitude": 52.1150,
+        "longitude": 21.2640,
+        "city": "Nieistniejowo",
+        "district": "",
+        "location_raw": "Nieistniejowo",
+    }
+    commute = calculate_commute_audit(listing)
+    assert commute["has_coords"] is True
+    assert commute["dist_center_km"] is None
+    assert commute["commute_time_min"] is None
+    assert commute["verdict"] == "BRAK PUNKTU ODNIESIENIA DOJAZDU"
+    titles = " ".join(f["title"] for f in commute["findings"])
+    assert "Centrum" not in titles
+    assert "Rzesz" not in titles
+    assert "Brak punktu odniesienia dojazdu" in titles
+
+
+def test_calculate_commute_audit_no_false_anchor_from_inflected_text():
+    # "ul. Krakowska" contains the substring "krakow", but must NOT anchor to Kraków.
+    listing = {
+        "latitude": 49.2992,
+        "longitude": 19.9496,
+        "city": "Zakopane",
+        "district": "",
+        "location_raw": "Zakopane, ul. Krakowska",
+    }
+    commute = calculate_commute_audit(listing)
+    assert commute["dist_center_km"] is None
+    assert commute["verdict"] == "BRAK PUNKTU ODNIESIENIA DOJAZDU"
+
+
+def test_calculate_commute_audit_word_boundary_anchor():
+    # A district name containing a known city should still anchor correctly.
+    listing = {
+        "latitude": 52.2317,
+        "longitude": 21.0183,
+        "city": "Mokotów",
+        "district": "",
+        "location_raw": "Warszawa, Mokotów",
+    }
+    commute = calculate_commute_audit(listing)
+    assert commute["dist_center_km"] is not None
+    assert commute["dist_center_km"] < 5.0
+    titles = " ".join(f["title"] for f in commute["findings"])
+    assert "Warszawa" in titles
+
+
 def test_calculate_risk_shield_danger_cases():
     listing = {
         "mpzp_status": "BRAK",
