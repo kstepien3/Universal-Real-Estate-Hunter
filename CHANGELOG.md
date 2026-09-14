@@ -6,6 +6,19 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.10.2 (2026-09-14)
+
+### Chores
+
+- Update uv, streamline Docker/CI, drop redundant python-dotenv
+  ([`111c97b`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/111c97bdf91987627f9dc11bc01c8b36faabd0f4))
+
+### Refactoring
+
+- Dedupe spatial field mapping and notification predicate
+  ([`d65c6e0`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/d65c6e024912c06512c6c7717012eeb492db1ce5))
+
+
 ## v1.10.1 (2026-09-14)
 
 ### Bug Fixes
