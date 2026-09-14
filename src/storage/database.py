@@ -248,7 +248,7 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("rooms", "INTEGER", "INTEGER"),
     ("floor", "INTEGER", "INTEGER"),
     ("floors_in_building", "INTEGER", "INTEGER"),
-    ("last_scraped_at", "DATETIME", "TIMESTAMP"),
+    ("last_scraped_at", "DATETIME", "TIMESTAMP WITH TIME ZONE"),
     ("is_private_owner", "BOOLEAN", "BOOLEAN"),
     ("profile_id", "VARCHAR(100)", "VARCHAR(100)"),
     ("profile_name", "VARCHAR(100)", "VARCHAR(100)"),
@@ -335,6 +335,27 @@ async def _migrate_database_columns(conn) -> None:
 
             if "profile_id" in existing_cols:
                 sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
+
+            if not is_sqlite:
+                tz_columns = [
+                    ("listings", "last_scraped_at"),
+                    ("listings", "notified_at"),
+                    ("listings", "created_at"),
+                    ("listings", "updated_at"),
+                    ("price_history", "recorded_at"),
+                    ("geocache", "cached_at"),
+                    ("spatial_cache", "created_at"),
+                    ("spatial_cache", "expires_at"),
+                ]
+                for tbl, col in tz_columns:
+                    try:
+                        sync_conn.execute(
+                            text(
+                                f"ALTER TABLE {tbl} ALTER COLUMN {col} TYPE TIMESTAMPTZ USING {col} AT TIME ZONE 'UTC'"
+                            )
+                        )
+                    except Exception as e:
+                        logger.debug(f"[Database] Column {tbl}.{col} timestamptz migration note: {e}")
 
             sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)"))
             sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_desc_hash ON listings (desc_hash)"))
