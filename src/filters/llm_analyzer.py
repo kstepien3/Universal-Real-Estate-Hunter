@@ -634,9 +634,7 @@ class LLMAnalyzer:
                     active_provider = providers_map[p_id]
                     break
 
-        from src.filters.hardware import SUGGESTED_OLLAMA_MODELS, detect_hardware_profile
-
-        hw_profile = detect_hardware_profile()
+        from src.filters.hardware import SUGGESTED_OLLAMA_MODELS
 
         return {
             "enabled": bool(self.enabled),
@@ -649,7 +647,6 @@ class LLMAnalyzer:
                 "local_openai": local_res,
                 "ollama": ollama_res,
             },
-            "hardware_profile": hw_profile,
             "suggested_models": SUGGESTED_OLLAMA_MODELS,
         }
 

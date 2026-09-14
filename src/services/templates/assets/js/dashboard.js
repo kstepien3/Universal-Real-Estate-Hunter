@@ -2831,25 +2831,7 @@
                 </div>
             `;
 
-            let hwHtml = '';
-            if (data.hardware_profile) {
-                const hw = data.hardware_profile;
-                hwHtml = `
-                    <div class="llm-hw-banner" style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:10px 12px;margin-bottom:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
-                        <div style="flex:1;min-width:200px;">
-                            <div style="font-weight:600;font-size:12px;display:flex;align-items:center;gap:6px;">
-                                <span>🖥️ ${escapeHtml(hw.device_label || 'Wykryty sprzęt')}</span>
-                            </div>
-                            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                                💡 ${escapeHtml(hw.recommendation_reason || '')}
-                            </div>
-                        </div>
-                        <button type="button" class="btn btn-sm btn-ghost" onclick="setLocalModelChip('${escapeHtml(hw.recommended_model || 'qwen2.5:7b')}')" style="font-size:11px;white-space:nowrap;">
-                            Wybierz: ${escapeHtml(hw.recommended_model || 'qwen2.5:7b')}
-                        </button>
-                    </div>
-                `;
-            }
+
 
             let installedChips = '';
             if (ol.installed_models && ol.installed_models.length > 0) {
@@ -2924,7 +2906,6 @@
             `;
 
             container.innerHTML = `
-                ${hwHtml}
                 ${bannerHtml}
                 <div class="llm-provider-list">
                     ${orRow}
