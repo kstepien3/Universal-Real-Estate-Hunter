@@ -230,14 +230,15 @@ class QualificationEngine:
             )
             score -= 20.0
 
-        # Walkability (PKA)
+        # Walkability (Kolej Aglomeracyjna)
         if listing.walkability_pka_dist_m is not None and listing.walkability_pka_dist_m <= 1500:
             walk_m = listing.walkability_pka_dist_m
             walk_min = max(1, round(walk_m / 80))
-            pka_n = listing.walkability_pka_name or "PKA"
-            pka_dest = " do centrum" if (listing.city or "").lower() not in ("rzeszów", "rzeszow") else " do Rzeszowa"
+            city_str = (listing.city or "").strip()
+            pka_dest = f" do centrum ({city_str})" if city_str else " do centrum"
+            pka_name = listing.walkability_pka_name or "kolejowa"
             pros.append(
-                f"🚆 Stacja kolejowa PKA ({pka_n}: {walk_m} m, ~{walk_min} min pieszo) — szybki dojazd{pka_dest}"
+                f"🚆 Stacja kolejowa ({pka_name}: {walk_m} m, ~{walk_min} min pieszo) — szybki dojazd{pka_dest}"
             )
             score += 5.0
 

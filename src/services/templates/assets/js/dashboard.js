@@ -25,7 +25,7 @@
         // ========================
         // Map (Leaflet + OpenStreetMap dark tiles)
         // ========================
-        function initLeafletMap(centerCoords = [50.0375, 22.0047]) {
+        function initLeafletMap(centerCoords = [52.0693, 19.4803]) {
             if (map) {
                 map.setView(centerCoords, 12);
                 return;
@@ -153,12 +153,12 @@
         };
 
         function getCityCenter(cityName) {
-            if (!cityName) return [50.0375, 22.0047];
+            if (!cityName) return [52.0693, 19.4803];
             const clean = cityName.toLowerCase()
                 .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e').replace(/ł/g,'l').replace(/ń/g,'n')
                 .replace(/ó/g,'o').replace(/ś/g,'s').replace(/ź/g,'z').replace(/ż/g,'z')
                 .replace(/[^a-z0-9]+/g, '');
-            return CITY_CENTROIDS_JS[clean] || [50.0375, 22.0047];
+            return CITY_CENTROIDS_JS[clean] || [52.0693, 19.4803];
         }
 
         function toggleProfileMenu(event) {
@@ -270,13 +270,14 @@
             `;
 
             const items = allProfiles.map(p => {
-                const isActive = p.id === selectedProfileId;
-                const isRzeszow = (p.city || '').toLowerCase().includes('rzeszów') || (p.city || '').toLowerCase().includes('rzeszow');
-
+                const isActive = selectedProfileId === p.id;
+                const pCity = (p.city || '').toLowerCase();
                 const count = allListings.filter(item => {
                     if (item.profile_id && item.profile_id === p.id) return true;
                     if (item.profile_name && item.profile_name === p.name) return true;
-                    if (isRzeszow && (!item.profile_id || item.profile_id === 'default') && p.id === 'default') return true;
+                    if (!item.profile_id || item.profile_id === 'default') {
+                        if (!pCity || (item.city || '').toLowerCase() === pCity) return true;
+                    }
                     return false;
                 }).length;
 
@@ -326,13 +327,15 @@
             }
 
             const profName = prof.name;
-            const isRzeszow = (prof.city || '').toLowerCase().includes('rzeszów') || (prof.city || '').toLowerCase().includes('rzeszow');
+            const profCity = (prof.city || '').toLowerCase();
 
             return allListings.filter(item => {
                 if (item.profile_id && item.profile_id === selectedProfileId) return true;
                 if (profName && item.profile_name === profName) return true;
-                if (isRzeszow && (!item.profile_id || item.profile_id === 'default') && selectedProfileId === 'default') {
-                    return true;
+                if (!item.profile_id || item.profile_id === 'default') {
+                    if (!profCity || (item.city || '').toLowerCase() === profCity) {
+                        return true;
+                    }
                 }
                 return false;
             });
@@ -647,7 +650,7 @@
             p.name = document.getElementById('cfgProfileName').value.trim() || p.name;
             p.category = cat;
             p.enabled = document.getElementById('cfgProfileEnabled').checked;
-            p.city = document.getElementById('cfgCity').value.trim() || 'Rzeszów';
+            p.city = document.getElementById('cfgCity').value.trim() || p.city || '';
             p.distance_radius = parseInt(document.getElementById('cfgRadius').value) || 15;
             p.market_type = document.getElementById('cfgMarket').value;
             p.owner_type = document.getElementById('cfgOwnerType').value;
@@ -1379,7 +1382,15 @@
 
             if (validCoordsItems.length > 0) {
                 try {
-                    map.fitBounds(markersGroup.getBounds(), { padding: [30, 30], maxZoom: 15 });
+                    if (map) map.invalidateSize();
+                    if (validCoordsItems.length === 1) {
+                        map.setView(
+                            [validCoordsItems[0].latitude, validCoordsItems[0].longitude],
+                            15
+                        );
+                    } else {
+                        map.fitBounds(markersGroup.getBounds(), { padding: [40, 40], maxZoom: 15 });
+                    }
                 } catch (e) {}
             }
             if (aqiLayerActive) {
@@ -3557,7 +3568,7 @@
         window.addEventListener('DOMContentLoaded', async () => {
             await fetchConfig();
             const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
-            const center = curProf ? getCityCenter(curProf.city) : [50.0375, 22.0047];
+            const center = curProf ? getCityCenter(curProf.city) : [52.0693, 19.4803];
             initLeafletMap(center);
             await fetchListings();
             checkActiveScrape();

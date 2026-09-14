@@ -1,8 +1,8 @@
 import re
 from typing import Any
 
-from config import settings
 from src.models.listing import ListingSchema
+from src.services.market_analyzer import haversine_km
 
 
 class Stage1Filter:
@@ -59,14 +59,10 @@ class Stage1Filter:
         self.min_floor = min_floor if min_floor is not None else getattr(cfg, "min_floor", None)
         self.max_floor = max_floor if max_floor is not None else getattr(cfg, "max_floor", None)
         self.blacklist = blacklist if blacklist is not None else (getattr(cfg, "blacklist_keywords", None) or [])
-        cfg_city = (getattr(cfg, "city", None) or "").strip().lower()
-        is_rzeszow = cfg_city in ("rzeszów", "rzeszow")
         if whitelist_areas is not None:
             self.whitelist_areas = whitelist_areas
         elif getattr(cfg, "whitelist_areas", None) is not None:
             self.whitelist_areas = cfg.whitelist_areas
-        elif is_rzeszow:
-            self.whitelist_areas = settings.WHITELIST_AREAS
         else:
             self.whitelist_areas = []
         self.category = getattr(cfg, "category", "dom")
@@ -207,6 +203,36 @@ class Stage1Filter:
 
         return None
 
+    @staticmethod
+    def _profile_city_center(profile: Any | None) -> tuple[float, float] | None:
+        """Resolve the target city centre coordinates from the profile's city name."""
+        city = getattr(profile, "city", None)
+        if not city:
+            return None
+        from src.services.config_manager import CITY_CENTROIDS, slugify_city
+
+        return CITY_CENTROIDS.get(slugify_city(city))
+
+    def _distance_violation(self, listing: ListingSchema, profile: Any | None = None) -> str | None:
+        """Return a rejection reason when the listing is resolved beyond the profile's
+        search radius from the target city centre, or None otherwise."""
+        if not listing.coordinates:
+            return None
+        p = profile or self.profile
+        radius = getattr(p, "distance_radius", None) if p else None
+        if not radius or radius <= 0:
+            return None
+        center = self._profile_city_center(p)
+        if not center:
+            return None
+        lat, lon = listing.coordinates
+        dist = haversine_km(lat, lon, center[0], center[1])
+        tolerance = 3.0
+        if dist > radius + tolerance:
+            city = getattr(p, "city", "") or ""
+            return f"Odległość ~{dist:.0f} km od {city} przekracza promień {radius} km"
+        return None
+
     def evaluate(self, listing: ListingSchema, profile: Any | None = None) -> tuple[bool, list[str], str | None]:
         """
         Runs Stage I filtration according to property category and criteria.
@@ -239,12 +265,8 @@ class Stage1Filter:
                 category = cat_val
 
         bl_words = getattr(p, "blacklist_keywords", self.blacklist) if p else self.blacklist
-        p_city = (getattr(p, "city", None) or "").strip().lower() if p else ""
-        is_p_rzeszow = p_city in ("rzeszów", "rzeszow")
         if p and getattr(p, "whitelist_areas", None) is not None:
             wl_areas = p.whitelist_areas
-        elif p and not is_p_rzeszow:
-            wl_areas = []
         else:
             wl_areas = self.whitelist_areas
         min_year = getattr(p, "min_year_built", self.min_year_built) if p else self.min_year_built
@@ -348,11 +370,16 @@ class Stage1Filter:
         # 6. Safety filters from public spatial registers (hard reject, unknown data never rejects)
         reasons.extend(self.check_safety_filters(listing, profile=p))
 
+        # 7. Distance gate: reject listings resolved beyond the profile's search
+        # radius from the target city centre. Whitelisted areas are exempt, since
+        # they may intentionally lie beyond the nominal radius.
+        matched_wl = self.check_whitelist(listing, wl_areas)
+        if not matched_wl and listing.coordinates and (violation := self._distance_violation(listing, p)) is not None:
+            reasons.append(violation)
+
         if reasons:
             return False, reasons, None
 
-        # Check whitelist match
-        matched_wl = self.check_whitelist(listing, wl_areas)
         return True, [], matched_wl
 
     def borderline_margins(self, listing: ListingSchema, profile: Any | None = None) -> list[str]:

@@ -51,6 +51,10 @@ class GeoportalService:
     # Powiat-level GESUT WMS services (pixel-based detection, see get_gesut_networks).
     # Layer names follow the Rozporządzenie MRPiT z 23.07.2021 (GESUT) specification.
     GESUT_WMS_SERVICES = [
+        {
+            "name": "Krajowa Integracja Uzbrojenia Terenu (GUGiK)",
+            "url": "https://integracja.gugik.gov.pl/cgi-bin/KrajowaIntegracjaUzbrojeniaTerenu",
+        },
         {"name": "Miasto Rzeszów", "url": "https://osrodek.erzeszow.pl/map/geoportal/wmsg.php"},
         {"name": "Powiat rzeszowski", "url": "https://powiatrzeszowski.geoportal2.pl/map/geoportal/wmsg.php"},
     ]
@@ -290,6 +294,109 @@ class GeoportalService:
 
         return ""
 
+    @staticmethod
+    def _decode_mpzp_text(resp: httpx.Response) -> str:
+        raw = getattr(resp, "content", None)
+        if isinstance(raw, (bytes, bytearray)):
+            text = raw.decode("utf-8", errors="replace")
+            if "\ufffd" in text:
+                alt = raw.decode("cp1250", errors="replace")
+                if alt.count("\ufffd") < text.count("\ufffd"):
+                    text = alt
+            return text
+        return resp.text or ""
+
+    @classmethod
+    def _parse_mpzp_payload(cls, text: str) -> dict[str, str | None] | None:
+        """
+        Krajowa Integracja MPZP is a cascading WMS — every county serves GetFeatureInfo
+        in its own format. Handles all formats observed in production:
+        A) XML ROWSET (Warszawa): FUN_SYMB / FUN_NAZWA / NAZWA_PLAN
+        B) HTML attribute tables (Rzeszów miasto): SYMBOL / OPIS / UCHWALA / NAZWA2
+        C) ESRI FeatureInfoCollection (Kraków): Oznaczenie / opis_oznac / Nazwa MPZP
+        D) Raster-only plan metadata (powiat rzeszowski / igeomap): Nazwa planu +
+           Poziom informatyzacji = rastrowy (plan obowiązuje, brak oznaczeń wektorowych)
+        Returns None when no recognizable plan payload is present.
+        """
+        # A) XML ROWSET (Warszawa)
+        symb_m = re.search(r"<FUN_SYMB>\s*([^<]+?)\s*</FUN_SYMB>", text, re.IGNORECASE | re.DOTALL)
+        nazwa_m = re.search(r"<FUN_NAZWA>\s*([^<]+?)\s*</FUN_NAZWA>", text, re.IGNORECASE | re.DOTALL)
+        plan_m = re.search(r"<NAZWA_PLAN>\s*([^<]+?)\s*</NAZWA_PLAN>", text, re.IGNORECASE | re.DOTALL)
+
+        symbol = symb_m.group(1).strip() if symb_m else None
+        fun_nazwa = nazwa_m.group(1).strip() if nazwa_m else None
+        plan_name = plan_m.group(1).strip() if plan_m else None
+
+        if symbol or fun_nazwa:
+            zone_desc = f"{symbol}: {fun_nazwa}" if (symbol and fun_nazwa) else (symbol or fun_nazwa)
+            return {
+                "status": "OBOWIĄZUJĄCY",
+                "zone": zone_desc,
+                "symbol": symbol,
+                "plan_name": plan_name,
+                "level": "wektorowy",
+            }
+
+        low = text.lower()
+
+        # C) ESRI FeatureInfoCollection (Kraków)
+        if "featureinfocollection" in low:
+            ths = [h.strip() for h in re.findall(r"<th\b[^>]*>([^<]*)</th>", text, re.IGNORECASE | re.DOTALL)]
+            tds = [d.strip() for d in re.findall(r"<td\b[^>]*>([^<]*)</td>", text, re.IGNORECASE | re.DOTALL)]
+            if len(ths) >= 5 and len(tds) >= len(ths):
+                esri_kv = dict(zip(ths, tds[: len(ths)], strict=True))
+                ozn = esri_kv.get("Oznaczenie")
+                opis = esri_kv.get("opis_oznac")
+                nazwa = esri_kv.get("Nazwa MPZP")
+                if ozn or opis:
+                    zone_desc = f"{ozn}: {opis}" if (ozn and opis) else (ozn or opis or "MPZP")
+                    return {
+                        "status": "OBOWIĄZUJĄCY",
+                        "zone": zone_desc,
+                        "symbol": ozn,
+                        "plan_name": nazwa,
+                        "level": "wektorowy",
+                    }
+
+        # B/D) Adjacent <th>/<td> key-value tables (Rzeszów miasto, igeomap raster)
+        kv: dict[str, str] = {}
+        for m in re.finditer(
+            r"<t[dh]\b[^>]*>([^<]+)</t[dh]>\s*<t[dh]\b[^>]*>(.*?)</t[dh]>",
+            text,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            key = re.sub(r"\s+", " ", m.group(1)).strip()
+            val = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", m.group(2))).strip()
+            if key and key.lower() != "layer":
+                kv.setdefault(key, val)
+
+        # D) Raster-only plan metadata — plan obowiązuje, ale bez cyfrowych oznaczeń
+        if kv.get("Poziom informatyzacji", "").strip().lower() == "rastrowy" and (
+            kv.get("Nazwa planu") or kv.get("Uchwała")
+        ):
+            return {
+                "status": "OBOWIĄZUJĄCY",
+                "zone": "Plan rastrowy (brak oznaczeń wektorowych)",
+                "symbol": None,
+                "plan_name": kv.get("Nazwa planu") or kv.get("Uchwała"),
+                "level": "rastrowy",
+            }
+
+        # B) Rzeszów miasto attribute tables
+        symbol = kv.get("SYMBOL") or kv.get("S_STANDARD")
+        opis = kv.get("OPIS")
+        if symbol or opis:
+            zone_desc = f"{symbol}: {opis}" if (symbol and opis) else (symbol or opis)
+            return {
+                "status": "OBOWIĄZUJĄCY",
+                "zone": zone_desc,
+                "symbol": symbol,
+                "plan_name": kv.get("NAZWA2") or kv.get("NAZWA"),
+                "level": "wektorowy",
+            }
+
+        return None
+
     async def get_mpzp_info(
         self,
         client: httpx.AsyncClient,
@@ -309,28 +416,15 @@ class GeoportalService:
         try:
             resp = await client.get(query_url, headers=self.headers, timeout=self.timeout, follow_redirects=True)
             if resp.status_code == 200:
-                text = resp.text
-                symb_m = re.search(r"<FUN_SYMB>(.*?)</FUN_SYMB>", text, re.IGNORECASE)
-                nazwa_m = re.search(r"<FUN_NAZWA>(.*?)</FUN_NAZWA>", text, re.IGNORECASE)
-                plan_m = re.search(r"<NAZWA_PLAN>(.*?)</NAZWA_PLAN>", text, re.IGNORECASE)
+                text = self._decode_mpzp_text(resp)
+                parsed = self._parse_mpzp_payload(text)
+                if parsed:
+                    self._cache[cache_key] = parsed
+                    return parsed
 
-                symbol = symb_m.group(1).strip() if symb_m else None
-                fun_nazwa = nazwa_m.group(1).strip() if nazwa_m else None
-                plan_name = plan_m.group(1).strip() if plan_m else None
-
-                if symbol or fun_nazwa:
-                    zone_desc = f"{symbol}: {fun_nazwa}" if (symbol and fun_nazwa) else (symbol or fun_nazwa)
+                low = text.lower()
+                if any(sig in low for sig in ("brak wyniku", "brak serwisu", "brak planu")):
                     mpzp_res: dict[str, str | None] = {
-                        "status": "OBOWIĄZUJĄCY",
-                        "zone": zone_desc,
-                        "symbol": symbol,
-                        "plan_name": plan_name,
-                    }
-                    self._cache[cache_key] = mpzp_res
-                    return mpzp_res
-
-                if "brak wyniku" in text.lower() or "<ROW" not in text:
-                    mpzp_res = {
                         "status": "BRAK_PLANU_LUB_CYFRYZACJI",
                         "zone": "Brak MPZP w rejestrze cyfrowym (wymagane WZ)",
                         "symbol": None,
@@ -338,6 +432,28 @@ class GeoportalService:
                     }
                     self._cache[cache_key] = mpzp_res
                     return mpzp_res
+
+                # Rows present but no recognized payload — unknown format, do not
+                # claim "brak planu" (avoids false WZ warnings for new proxy formats).
+                if "<ROW" in text.upper() or not text.strip():
+                    unknown_mpzp: dict[str, str | None] = {
+                        "status": "NIEZNANY",
+                        "zone": None,
+                        "symbol": None,
+                        "plan_name": None,
+                    }
+                    self._cache[cache_key] = unknown_mpzp
+                    return unknown_mpzp
+
+                # Empty HTML tables (layer echo without features) — no digital plan data.
+                mpzp_res = {
+                    "status": "BRAK_PLANU_LUB_CYFRYZACJI",
+                    "zone": "Brak MPZP w rejestrze cyfrowym (wymagane WZ)",
+                    "symbol": None,
+                    "plan_name": None,
+                }
+                self._cache[cache_key] = mpzp_res
+                return mpzp_res
         except Exception as e:
             logger.debug(f"[Geoportal] MPZP GetFeatureInfo failed: {e}")
 
@@ -1121,8 +1237,11 @@ class GeoportalService:
         """
         from src.services.market_analyzer import PKA_STATIONS, haversine_km
 
-        dist_to_rzeszow = haversine_km(lat, lon, 50.0375, 22.0047)
-        if dist_to_rzeszow > 60.0:
+        pka_distances = [(name, haversine_km(lat, lon, plat, plon)) for name, plat, plon in PKA_STATIONS]
+        pka_distances.sort(key=lambda x: x[1])
+        nearest_pka_name, nearest_pka_dist_km = pka_distances[0]
+
+        if nearest_pka_dist_km > 15.0:
             return {
                 "pka_name": None,
                 "nearest_station": None,
@@ -1132,21 +1251,18 @@ class GeoportalService:
                 "is_near_pka": False,
                 "walk_min": None,
                 "walk_time_min": None,
-                "description": "Lokalizacja poza obszarem Podkarpackiej Kolei Aglomeracyjnej (PKA).",
+                "description": "Lokalizacja poza zasięgiem kolei aglomeracyjnej (>15 km do stacji).",
             }
 
-        pka_distances = [(name, haversine_km(lat, lon, plat, plon)) for name, plat, plon in PKA_STATIONS]
-        pka_distances.sort(key=lambda x: x[1])
-        nearest_pka_name, nearest_pka_dist_km = pka_distances[0]
         pka_dist_m = int(round(nearest_pka_dist_km * 1000))
 
         is_near_pka = pka_dist_m <= 1500
         walk_min = max(1, round(pka_dist_m / 80))
 
         desc = (
-            f"Stacja PKA: {nearest_pka_name} ({pka_dist_m} m, ~{walk_min} min pieszo) – szybki dojazd do Rzeszowa"
+            f"Stacja kolejowa: {nearest_pka_name} ({pka_dist_m} m, ~{walk_min} min pieszo) – szybki dojazd aglomeracyjny"
             if is_near_pka
-            else f"Najbliższa stacja PKA: {nearest_pka_name} ({nearest_pka_dist_km:.1f} km)"
+            else f"Najbliższa stacja kolejowa: {nearest_pka_name} ({nearest_pka_dist_km:.1f} km)"
         )
 
         return {
@@ -1215,7 +1331,7 @@ class GeoportalService:
         6. Generates direct Geoportal link.
         """
         cat_str = category.value if hasattr(category, "value") else str(category or "dom")
-        audit_cache_key = f"audit:{round(lat, 5)},{round(lon, 5)}:{cat_str.lower()}"
+        audit_cache_key = f"audit:v3:{round(lat, 5)},{round(lon, 5)}:{cat_str.lower()}"
         cached_audit = await self._get_cached(audit_cache_key)
         if cached_audit and isinstance(cached_audit, dict):
             return cached_audit

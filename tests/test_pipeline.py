@@ -321,7 +321,7 @@ async def test_pipeline_integrates_advanced_spatial_features(async_session, monk
 
     # Pros checks
     assert any("Światłowód aktywny" in p for p in model.pros)
-    assert any("Stacja kolejowa PKA" in p for p in model.pros)
+    assert any("Stacja kolejowa" in p for p in model.pros)
 
     # Cons checks
     assert any("Wąski front działki" in c for c in model.cons)
@@ -397,7 +397,7 @@ async def test_pipeline_backfill_existing_spatial_data(async_session, monkeypatc
     assert any("Światłowód aktywny" in p for p in updated_model.pros)
     assert any("Foremna działka" in p for p in updated_model.pros)
     assert any("Południowa ekspozycja" in p for p in updated_model.pros)
-    assert any("Stacja kolejowa PKA" in p for p in updated_model.pros)
+    assert any("Stacja kolejowa" in p for p in updated_model.pros)
 
     # Initial 90.0 + 5 (FTTH) + 5 (PKA) = 100.0
     assert updated_model.qualification_score == 100.0

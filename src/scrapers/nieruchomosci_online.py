@@ -22,7 +22,7 @@ from src.models.listing import ListingSchema
 
 from .base import BaseScraper
 
-NIERUCHOMOSCI_ONLINE_BASE = "https://rzeszow.nieruchomosci-online.pl/domy,sprzedaz/"
+NIERUCHOMOSCI_ONLINE_BASE = "https://www.nieruchomosci-online.pl/"
 
 
 class NieruchomosciOnlineScraper(BaseScraper):
@@ -273,9 +273,12 @@ class NieruchomosciOnlineScraper(BaseScraper):
             if not url.startswith("http"):
                 from src.services.config_manager import slugify_city
 
-                profile_city = getattr(self.profile, "city", None) or "Rzeszów"
-                city_slug = slugify_city(profile_city)
-                url = f"https://{city_slug}.nieruchomosci-online.pl{url}"
+                profile_city = getattr(self.profile, "city", None) or ""
+                city_slug = slugify_city(profile_city) if profile_city else ""
+                if city_slug:
+                    url = f"https://{city_slug}.nieruchomosci-online.pl{url}"
+                else:
+                    url = f"https://www.nieruchomosci-online.pl{url}"
 
             # Portal ID
             id_match = re.search(r"/(\d+)\.html", url)
@@ -324,7 +327,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
 
             # Location
             prov_p = tile.select_one("p.province")
-            default_city = getattr(self.profile, "city", None) or "Rzeszów"
+            default_city = getattr(self.profile, "city", None) or ""
             location_raw = prov_p.get_text(" ", strip=True).replace("\xa0", " ") if prov_p else default_city
 
             # Image

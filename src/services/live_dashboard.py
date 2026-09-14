@@ -10,7 +10,7 @@ from typing import Any
 
 from aiohttp import web
 from loguru import logger
-from sqlalchemy import desc, or_, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.services.config_manager import config_manager
@@ -393,12 +393,13 @@ class LiveDashboardServer:
                 if matched_prof:
                     conds.append(ListingModel.profile_id == matched_prof.id)
                     conds.append(ListingModel.profile_name == matched_prof.name)
-                # If checking default profile, only match legacy records where profile_id is None if profile is Rzeszów
-                is_rzeszow = (
-                    matched_prof.city.lower() in ("rzeszów", "rzeszow") if matched_prof else (prof_filter == "default")
-                )
-                if is_rzeszow and (prof_filter == "default" or (matched_prof and matched_prof.id == "default")):
-                    conds.append(ListingModel.profile_id.is_(None))
+                # Legacy records without a real profile assignment are matched by the profile's city
+                if matched_prof:
+                    legacy_cond = or_(ListingModel.profile_id.is_(None), ListingModel.profile_id == "default")
+                    if matched_prof.city:
+                        conds.append(and_(legacy_cond, ListingModel.city == matched_prof.city))
+                    else:
+                        conds.append(legacy_cond)
                 stmt = stmt.where(or_(*conds))
 
             stmt = stmt.order_by(

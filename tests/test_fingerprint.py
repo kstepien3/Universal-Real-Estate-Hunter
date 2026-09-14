@@ -44,3 +44,11 @@ def test_property_fingerprint_differentiation():
     )
 
     assert fp1 != fp2, "Different houses must have distinct fingerprints"
+
+
+def test_extract_street_token_unknown_fallback():
+    from src.filters.fingerprint import extract_street_token
+
+    # When no street pattern matches in street or title
+    token = extract_street_token(street="", title="Nieruchomość bez nazwy ulicy")
+    assert token == "unknown_area", f"Expected unknown_area, got {token}"

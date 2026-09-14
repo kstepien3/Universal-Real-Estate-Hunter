@@ -22,7 +22,7 @@ from src.models.listing import ListingSchema
 
 from .base import BaseScraper
 
-OLX_BASE_SEARCH_URL = "https://www.olx.pl/nieruchomosci/domy/sprzedaz/rzeszow/?search%5Bdist%5D=15"
+OLX_BASE_URL = "https://www.olx.pl/"
 
 
 class OLXScraper(BaseScraper):
@@ -232,7 +232,7 @@ class OLXScraper(BaseScraper):
 
             # Location
             location_obj = ad.get("location", {})
-            default_city = getattr(self.profile, "city", None) or "Rzeszów"
+            default_city = getattr(self.profile, "city", None) or ""
             city_name = location_obj.get("cityName", default_city)
             district_name = location_obj.get("districtName")
             location_raw = f"{city_name}, {district_name}" if district_name else city_name
@@ -472,7 +472,7 @@ class OLXScraper(BaseScraper):
 
                         # Extract area from title or subtitle
                         desc_p = card.select_one('span[data-testid="location-date"]')
-                        fallback_city = getattr(self.profile, "city", None) or "Rzeszów"
+                        fallback_city = getattr(self.profile, "city", None) or ""
                         loc_txt = desc_p.get_text(strip=True) if desc_p else fallback_city
 
                         fp = generate_property_fingerprint(

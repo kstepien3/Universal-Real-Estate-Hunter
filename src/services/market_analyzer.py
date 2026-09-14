@@ -390,8 +390,6 @@ def calculate_notary_and_court_fee(price: float) -> float:
     return float(round(base * 1.23 + 400.0))
 
 
-RZESZOW_CENTER = (50.0375, 22.0047)  # Rynek / Dworzec Główny
-
 PKA_STATIONS = [
     ("Rzeszów Główny", 50.0435, 22.0083),
     ("Rzeszów Zachodni", 50.0440, 21.9860),
@@ -578,7 +576,7 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
     district = str(_prop(listing, "district", "") or "").strip()
 
     if lat is None or lon is None or (float(lat) == 0.0 and float(lon) == 0.0):
-        loc = f"{city} ({district})" if city and district else (city or "Okolice Rzeszowa")
+        loc = f"{city} ({district})" if city and district else (city or "Obszar poszukiwań")
         return {
             "has_coords": False,
             "verdict": "LOKALIZACJA PRZYBLIŻONA",
@@ -592,7 +590,7 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
                 {
                     "badge": "📍 Przybliżony Adres",
                     "title": f"Lokalizacja: {loc}",
-                    "desc": "Dokładne odległości do stacji PKA i centrum zostaną wyliczone po podaniu ulicy lub numeru działki.",
+                    "desc": "Dokładne odległości do centrum i węzłów komunikacyjnych zostaną wyliczone po podaniu ulicy lub numeru działki.",
                     "severity": "info",
                 }
             ],
@@ -603,9 +601,6 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
 
     # 1. Resolve Target City Center
     from src.services.config_manager import CITY_CENTROIDS, slugify_city
-
-    city_center_coords = RZESZOW_CENTER
-    city_display = city or "Rzeszów"
 
     city_slug = slugify_city(city) if city else ""
     if city_slug in CITY_CENTROIDS:
@@ -618,27 +613,32 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
                 city_center_coords = coords
                 city_display = c_slug.capitalize()
                 break
+        else:
+            closest_slug, closest_coords = min(
+                CITY_CENTROIDS.items(),
+                key=lambda item: haversine_km(flat, flon, item[1][0], item[1][1]),
+            )
+            city_center_coords = closest_coords
+            city_display = closest_slug.capitalize()
 
     dist_center = haversine_km(flat, flon, city_center_coords[0], city_center_coords[1])
     commute_min = max(5, round(dist_center * 1.5 + 4))
-
-    dist_to_rzeszow = haversine_km(flat, flon, RZESZOW_CENTER[0], RZESZOW_CENTER[1])
-    is_podkarpacie = dist_to_rzeszow <= 60.0
 
     nearest_pka_name: str | None = None
     nearest_pka_dist: float | None = None
     nearest_hub_name: str | None = None
     nearest_hub_dist: float | None = None
 
-    if is_podkarpacie:
-        # 2. Nearest PKA Station
-        pka_distances = [(name, haversine_km(flat, flon, plat, plon)) for name, plat, plon in PKA_STATIONS]
-        pka_distances.sort(key=lambda x: x[1])
+    # Check rail proximity
+    pka_distances = [(name, haversine_km(flat, flon, plat, plon)) for name, plat, plon in PKA_STATIONS]
+    pka_distances.sort(key=lambda x: x[1])
+    if pka_distances[0][1] <= 15.0:
         nearest_pka_name, nearest_pka_dist = pka_distances[0]
 
-        # 3. Nearest Expressway Hub (A4 / S19)
-        hub_distances = [(name, haversine_km(flat, flon, hlat, hlon)) for name, hlat, hlon in EXPRESSWAY_HUBS]
-        hub_distances.sort(key=lambda x: x[1])
+    # Check expressway proximity
+    hub_distances = [(name, haversine_km(flat, flon, hlat, hlon)) for name, hlat, hlon in EXPRESSWAY_HUBS]
+    hub_distances.sort(key=lambda x: x[1])
+    if hub_distances[0][1] <= 25.0:
         nearest_hub_name, nearest_hub_dist = hub_distances[0]
 
     findings: list[dict[str, str]] = []
@@ -673,23 +673,24 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
             }
         )
 
-    # PKA (only for Podkarpacie region)
-    if is_podkarpacie and nearest_pka_dist is not None and nearest_pka_name is not None:
+    # Rail / Aglomeracja
+    if nearest_pka_dist is not None and nearest_pka_name is not None:
+        dest_center = f" do centrum ({city_display})" if city_display else " do centrum"
         if nearest_pka_dist <= 1.5:
             findings.append(
                 {
-                    "badge": "🚆 Kolej Aglomeracyjna PKA < 1.5 km",
+                    "badge": "🚆 Kolej Aglomeracyjna < 1.5 km",
                     "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-                    "desc": "Dojście pieszo lub rowerem do stacji PKA! Szybki transport do centrum w 10–12 min bez stania w korkach. Kluczowy atut podnoszący wartość nieruchomości.",
+                    "desc": f"Dojście pieszo lub rowerem do stacji! Szybki transport{dest_center} w 10–15 min bez stania w korkach. Kluczowy atut podnoszący wartość nieruchomości.",
                     "severity": "success",
                 }
             )
         elif nearest_pka_dist <= 3.5:
             findings.append(
                 {
-                    "badge": "🚆 Stacja PKA w Zasięgu Auta (Park & Ride)",
+                    "badge": "🚆 Stacja Kolejowa (Park & Ride)",
                     "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-                    "desc": "Dojazd autem 3–5 min do stacji PKA. Możliwość korzystania z pociągu aglomeracyjnego.",
+                    "desc": "Dojazd autem 3–5 min do stacji kolejowej. Wygodna opcja codziennego dojazdu pociągiem aglomeracyjnym.",
                     "severity": "info",
                 }
             )
@@ -698,13 +699,13 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
                 {
                     "badge": "🚌 Brak Bliskiej Kolei",
                     "title": f"Najbliższa stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-                    "desc": "Brak bezpośredniego dostępu do PKA. Komunikacja oparta w 100% na transporcie kołowym (autobusy / auto).",
+                    "desc": "Brak bezpośredniego pieszego dostępu do stacji kolejowej. Komunikacja oparta głównie na transporcie kołowym.",
                     "severity": "info",
                 }
             )
 
-    # Expressway (only for Podkarpacie region)
-    if is_podkarpacie and nearest_hub_dist is not None and nearest_hub_name is not None:
+    # Expressway
+    if nearest_hub_dist is not None and nearest_hub_name is not None:
         if nearest_hub_dist < 0.45:
             findings.append(
                 {
@@ -717,14 +718,14 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
         elif nearest_hub_dist <= 5.0:
             findings.append(
                 {
-                    "badge": "🛣️ Wygodny Wylot na A4 / S19",
+                    "badge": "🛣️ Wygodny Wylot na Trasę Szybkiego Ruchu",
                     "title": f"{nearest_hub_name} ({nearest_hub_dist:.1f} km)",
-                    "desc": "Szybki wjazd na obwodnicę i autostradę w kilka minut bez wjeżdżania do zatłoczonego centrum.",
+                    "desc": "Szybki wjazd na obwodnicę i trasę szybkiego ruchu w kilka minut bez wjeżdżania do zatłoczonego centrum.",
                     "severity": "success",
                 }
             )
 
-    if is_podkarpacie and nearest_pka_dist is not None:
+    if nearest_pka_dist is not None:
         if dist_center <= 6.0 and nearest_pka_dist <= 2.0:
             commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
             commute_sev = "success"
@@ -775,6 +776,15 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
                 "title": f"Plan Miejscowy Obowiązujący (Strefa: {mpzp_zone})",
                 "desc": "Teren objęty uchwalonym MPZP. Gwarancja stabilności otoczenia — sąsiad nie wybuduje obiektu sprzecznego z przeznaczeniem w planie.",
                 "severity": "success",
+            }
+        )
+    elif mpzp_status == "NIEZNANY" and not mpzp_zone:
+        findings.append(
+            {
+                "badge": "❓ Status Planistyczny Nieustalony",
+                "title": "Nie udało się pobrać danych MPZP z Geoportalu",
+                "desc": "Serwis planistyczny nie zwrócił jednoznacznych danych dla tej lokalizacji. Zweryfikuj plan ręcznie w Geoportalu Krajowym lub w urzędzie gminy.",
+                "severity": "info",
             }
         )
     else:
@@ -1056,11 +1066,13 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
     pka_name = _prop(listing, "walkability_pka_name", None)
     if pka_dist_m is not None and int(pka_dist_m) <= 1500:
         walk_min = max(1, round(int(pka_dist_m) / 80))
+        city_name = str(_prop(listing, "city", "") or "").strip()
+        dest = f"z centrum ({city_name})" if city_name else "z centrum"
         findings.append(
             {
-                "badge": f"🚆 Stacja PKA w Zasięgu Spaceru ({pka_dist_m}m)",
-                "title": f"Piesze dojście do stacji {pka_name or 'PKA'} (~{walk_min} min)",
-                "desc": f"Znakomita dostępność komunikacyjna ({pka_dist_m} m pieszo). Szybkie połączenie szynobusowe z centrum Rzeszowa bez stania w korkach.",
+                "badge": f"🚆 Stacja Kolejowa w Zasięgu Spaceru ({pka_dist_m}m)",
+                "title": f"Piesze dojście do stacji {pka_name or 'kolejowej'} (~{walk_min} min)",
+                "desc": f"Znakomita dostępność komunikacyjna ({pka_dist_m} m pieszo). Szybkie połączenie szynobusowe / kolejowe {dest} bez stania w korkach.",
                 "severity": "success",
             }
         )

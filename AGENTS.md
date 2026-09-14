@@ -65,3 +65,19 @@ Every code change touching scrapers, models, filters, or web interface must sati
 2. **Type Checking**: `mypy src/ tests/` (zero errors).
 3. **Linter**: `ruff check src/ tests/` (zero warnings/errors).
 4. **Container Rebuild** (when services or dependencies change): `docker compose build && docker compose up -d`
+
+---
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues via `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Canonical roles: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context (`CONTEXT.md` + `docs/adr/`). See `docs/agents/domain.md`.

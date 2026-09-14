@@ -643,7 +643,10 @@ class LLMAnalyzer:
         if listing.mpzp_zone:
             spatial_lines.append(f"MPZP zoning: {listing.mpzp_zone} (status: {listing.mpzp_status or 'nieznany'})")
         elif listing.parcel_id:
-            spatial_lines.append("MPZP zoning: Brak planu lub brak danych cyfrowych (wymagane WZ)")
+            if listing.mpzp_status == "NIEZNANY":
+                spatial_lines.append("MPZP zoning: Nieustalony (błąd pobierania danych — wymaga ręcznej weryfikacji)")
+            else:
+                spatial_lines.append("MPZP zoning: Brak planu lub brak danych cyfrowych (wymagane WZ)")
 
         if listing.flood_risk_zone:
             spatial_lines.append(f"Flood risk (ISOK): {listing.flood_risk_zone}")

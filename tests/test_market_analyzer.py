@@ -649,7 +649,7 @@ def test_calculate_risk_shield_with_shape_slope_power_fiber_pka():
     assert any("Strome Nachylenie Terenu" in b for b in badges)
     assert any("Linia Wysokiego Napięcia" in b for b in badges)
     assert any("Brak Światłowodu" in b for b in badges)
-    assert any("Stacja PKA w Zasięgu Spaceru" in b for b in badges)
+    assert any("Stacja Kolejowa w Zasięgu Spaceru" in b for b in badges)
 
 
 def test_analyze_negotiation_with_shape_slope_power_factors():

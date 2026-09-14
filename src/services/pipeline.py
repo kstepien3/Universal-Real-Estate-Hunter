@@ -646,6 +646,12 @@ class ScraperPipeline:
                 "skipped_reason": "already_running",
             }
 
+        # Signal the tracker that a cycle is starting right now — before any
+        # heavy startup work (init_db, fresh URLs, medians). Otherwise the
+        # dashboard would briefly report the previous cycle's stale
+        # "completed 100%" state and stop polling.
+        global_tracker.mark_starting()
+
         try:
             return await self._do_run_cycle(target_profile=target_profile)
         finally:

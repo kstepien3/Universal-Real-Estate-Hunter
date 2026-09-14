@@ -149,18 +149,28 @@ class ProgressTracker:
         except Exception:
             pass
 
-    def start_session(self, total_portals: int = 3) -> None:
+    def mark_starting(self) -> None:
+        """Mark the tracker as running immediately, before the pipeline's heavy
+        startup work begins. Prevents the dashboard from briefly reporting a
+        stale 'completed' status from a previous cycle while a new one starts."""
         clear_shared_cancellation()
         self.is_running = True
         self.cancel_requested = False
         self.current_portal = ""
         self.current_step = "Inicjalizacja scrapingu..."
+        self.current_page = 0
+        self.total_pages = 0
         self.items_scraped = 0
         self.items_qualified = 0
         self.duplicates_found = 0
-        self.percentage = 5
+        self.percentage = 0
         self.logs = []
         self._session_started_at = datetime.now(UTC)
+        self._sync_shared_status()
+
+    def start_session(self, total_portals: int = 3) -> None:
+        self.mark_starting()
+        self.percentage = 5
         self._parallel_total = max(total_portals, 1)
         self._parallel_done = 0
         self.add_log("🚀 Rozpoczęto cykl scrapingu i analizy ofert.")

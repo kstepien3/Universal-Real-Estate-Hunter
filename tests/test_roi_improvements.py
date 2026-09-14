@@ -274,3 +274,41 @@ async def test_medians_cache_hit_avoids_db():
     assert second == first
     fake_session.execute.assert_not_called()
     clear_medians_cache()
+
+
+def test_geocoder_fallback_does_not_leak_rzeszow_to_other_cities():
+    from src.services.geocoder import NominatimGeocoder
+
+    gc = NominatimGeocoder()
+
+    # Case 1: An offer in Poznań on street "Nowe Miasto" or "Biała" must NOT get Rzeszów centroid
+    res_poznan = gc._find_district_fallback(
+        street="ul. Biała 10",
+        district=None,
+        city="Poznań",
+        location_raw="Poznań, Wielkopolskie",
+    )
+    # It should match Poznań from CITY_CENTROIDS, not "Biała" from Rzeszów
+    from src.services.config_manager import CITY_CENTROIDS
+
+    assert res_poznan == CITY_CENTROIDS["poznan"]
+
+    # Case 2: A non-Rzeszów city with a district matching a common name like "Nowa Wieś"
+    res_nowa_wies = gc._find_district_fallback(
+        street="ul. Główna",
+        district="Nowa Wieś",
+        city="Warszawa",
+        location_raw="Warszawa, Mazowieckie",
+    )
+    assert res_nowa_wies == CITY_CENTROIDS["warszawa"]
+
+    # Case 3: In Rzeszów, district "Słocina" should resolve to Słocina centroid
+    res_slocina = gc._find_district_fallback(
+        street=None,
+        district="Słocina",
+        city="Rzeszów",
+        location_raw="Rzeszów, Słocina",
+    )
+    from src.services.geocoder import DISTRICT_CENTROIDS_BY_CITY
+
+    assert res_slocina == DISTRICT_CENTROIDS_BY_CITY["rzeszow"]["słocina"]
