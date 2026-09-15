@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.12.1 (2026-09-15)
+
+### Performance Improvements
+
+- **dashboard**: Leaner listings API, first-party image proxy, lazy map init
+  ([`d586fdf`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/d586fdfe669cc3bf883f5b65b77fe2918a12c245))
+
+
 ## v1.12.0 (2026-09-15)
 
 ### Features
