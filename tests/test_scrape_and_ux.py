@@ -182,14 +182,17 @@ async def test_live_dashboard_listings_includes_gunb_and_gesut():
         assert item["is_updated_cycle"] is False
         assert "identifyParcel=181609_2.0001.2643/7" in item["geoportal_url"]
         assert item["parcel_id"] == "181609_2.0001.2643/7"
-        assert "land_audit" in item
-        assert item["land_audit"]["search_packet"]["voivodeship"] == "Podkarpackie"
-        assert item["land_audit"]["search_packet"]["parcel_short"] == "2643/7"
-        assert "tco_audit" in item["land_audit"]
-        assert "commute_audit" in item["land_audit"]
-        assert "risk_shield" in item["land_audit"]
-        assert "gesut_audit" in item["land_audit"]
-        assert item["land_audit"]["tco_audit"]["total_acquisition_cost"] >= 350_000
+        assert "land_audit" not in item
+        assert item["capex_total"] >= 350_000
+        detail = await (await client.get(f"/api/listings/{item['id']}")).json()
+        assert "land_audit" in detail
+        assert detail["land_audit"]["search_packet"]["voivodeship"] == "Podkarpackie"
+        assert detail["land_audit"]["search_packet"]["parcel_short"] == "2643/7"
+        assert "tco_audit" in detail["land_audit"]
+        assert "commute_audit" in detail["land_audit"]
+        assert "risk_shield" in detail["land_audit"]
+        assert "gesut_audit" in detail["land_audit"]
+        assert detail["land_audit"]["tco_audit"]["total_acquisition_cost"] >= 350_000
 
 
 @pytest.mark.asyncio
@@ -615,6 +618,8 @@ async def test_live_dashboard_listings_endpoint_contains_full_data():
         target = next((item for item in listings_data if item.get("portal_id") == "test-details-ux-1"), None)
         assert target is not None
         assert target["portal_id"] == "test-details-ux-1"
-        assert "land_audit" in target
-        assert "negotiation_arguments" in target
+        assert "capex_total" in target
         assert "fair_market_value" in target
+        detail = await (await client.get(f"/api/listings/{target['id']}")).json()
+        assert "land_audit" in detail
+        assert "negotiation_arguments" in detail

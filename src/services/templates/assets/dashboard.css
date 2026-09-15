@@ -22,7 +22,7 @@
             --text-primary: #e8eaef;
             --text-strong: #f0f3f8;
             --text-secondary: #9aa1b0;
-            --text-muted: #626a7a;
+            --text-muted: #7e8799;
             --text-faint: #3d4452;
 
             /* Typographic scale — minimum 13px for meaningful content */
@@ -118,12 +118,12 @@
         input, select, textarea { font-family: inherit; }
 
         /* Every numeric value renders with aligned digits */
-        .num, .price-main, .price-m2, .market-delta, .price-drop, .kpi-main-value,
-        .kpi-main-sub, .pipe-item b, .card-media-count, .filters-count, .profile-drop-count,
+        .num, .price-main, .price-m2, .market-delta, .price-drop,
+        .pipe-item b, .card-media-count, .filters-count, .profile-drop-count,
         .spec-value, .log-time, .prog-metrics strong, .progress-pct,
-        .capex-table td, .dd-table td.value, .ai-neg-tile-val, .nego-tile-val,
+        .capex-table td, .dd-table td.value, .nego-tile-val,
         .ph-price, .ph-badge, .popup-price, .popup-specs, .meta-score strong,
-        .audit-copy-hint, .verdict-meta, .tco-kpi-val, .notes-status-text,
+        .notes-status-text,
         .results-count b, .filter-token b {
             font-variant-numeric: tabular-nums;
         }
@@ -186,14 +186,6 @@
             max-width: 260px;
         }
 
-        .brand-subtitle {
-            font-size: var(--font-size-2xs);
-            color: var(--text-muted);
-            white-space: nowrap;
-            overflow: hidden;
-            text-overflow: ellipsis;
-        }
-
         .live-chip {
             display: inline-flex;
             align-items: center;
@@ -216,8 +208,6 @@
             background: var(--green);
             flex: none;
         }
-
-        .live-dot.paused { background: var(--amber); }
 
         .topbar-center { display: flex; align-items: center; gap: 10px; margin-left: auto; min-width: 0; }
 
@@ -1176,6 +1166,8 @@
             transition: border-color 0.15s ease, background 0.15s ease;
             display: flex;
             flex-direction: column;
+            content-visibility: auto;
+            contain-intrinsic-size: auto 600px;
         }
         .card:hover { border-color: #404040; }
         .card.is-favorite { border-color: rgba(234, 179, 8, 0.35); }
@@ -1264,7 +1256,6 @@
         .card-badge.badge-rejected { color: var(--red-text); border-color: var(--red-border); }
         .card-badge.badge-new { color: var(--green-text); border-color: var(--green-border); }
         .card-badge.badge-updated { color: var(--violet-text); border-color: var(--violet-border); }
-        .card-badge.badge-checked { color: var(--slate-text); border-color: var(--slate-border); }
 
         .card-fav-btn {
             pointer-events: auto;
@@ -1368,11 +1359,6 @@
             border: 1px solid transparent;
             white-space: nowrap;
         }
-        .workflow-badge.workflow-qualified { color: var(--blue-text); background: var(--blue-bg); border-color: var(--blue-border); }
-        .workflow-badge.workflow-whitelist { color: var(--green-text); background: var(--green-bg); border-color: var(--green-border); }
-        .workflow-badge.workflow-review { color: var(--amber-text); background: var(--amber-bg); border-color: var(--amber-border); }
-        .workflow-badge.workflow-rejected { color: var(--red-text); background: var(--red-bg); border-color: var(--red-border); }
-        .workflow-badge.workflow-checked { color: var(--slate-text); background: var(--slate-bg); border-color: var(--slate-border); }
 
         .card-title {
             font-size: var(--font-size-md);
@@ -2088,8 +2074,6 @@
         .verdict-badge.unknown { background: var(--amber-bg); color: var(--amber-text); border-color: var(--amber-border); }
         .verdict-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
 
-        .verdict-meta { font-size: var(--font-size-2xs); color: var(--text-faint); }
-
         /* Key-value legal parameter table */
         .dd-table {
             width: 100%;
@@ -2122,7 +2106,6 @@
         .dd-table .row-warn td.value { color: var(--amber-text); }
         .dd-table .row-danger td, .dd-table .row-danger th { background: rgba(239, 68, 68, 0.05); }
         .dd-table .row-danger td.value { color: var(--red-text); }
-        .dd-table .row-ok td.value { color: var(--slate-text); }
 
         .copy-inline-btn {
             display: inline-flex;
@@ -2178,9 +2161,6 @@
         .audit-finding-list { display: flex; flex-direction: column; gap: 6px; }
         .audit-finding-item { display: flex; gap: 9px; align-items: flex-start; }
         .audit-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex: none; }
-        .audit-dot.d-danger { background: var(--red); }
-        .audit-dot.d-warning { background: var(--amber); }
-        .audit-dot.d-success { background: var(--green); }
         .audit-dot.d-info { background: var(--blue); }
         .audit-finding-body { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
         .audit-finding-title { font-size: var(--font-size-sm); font-weight: var(--font-weight-semibold); color: var(--text-primary); }
@@ -2739,7 +2719,6 @@
             /* Header: condensed 36px touch targets, ellipsis selector, spinner-only sync */
             .topbar { padding: 4px 10px; gap: 8px; }
             .topbar-brand { flex: 0 0 auto; }
-            .brand-subtitle { display: none; }
             .brand-title { max-width: 140px; }
             .perspective-wrap { display: none !important; }
             .topbar-center {
@@ -2809,8 +2788,8 @@
             }
             .topbar-sync-btn .spinner-inline { margin-right: 0; }
 
-            /* Command bar / Toolbar: pipeline scroll, search + filters + sort in single line */
-            .command-bar, .toolbar {
+            /* Command bar: pipeline scroll, search + filters + sort in single line */
+            .command-bar {
                 height: auto;
                 min-height: 0;
                 max-height: none;
@@ -2950,19 +2929,6 @@
                 box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.5);
             }
 
-            /* KPI: compact p-3 + horizontally scrollable tabs with fade */
-            .kpi-bar { flex-direction: column; overflow: hidden; }
-            .kpi-main {
-                border-right: none;
-                border-bottom: 1px solid var(--border);
-                min-width: 0;
-                flex-direction: row;
-                align-items: baseline;
-                gap: 8px;
-                padding: 8px 12px;
-            }
-            .kpi-main-value { font-size: 19px; }
-            .kpi-main-sub { margin-left: auto; white-space: nowrap; }
             .pipeline {
                 border-top: none;
                 flex-wrap: nowrap;
@@ -3012,7 +2978,10 @@
             }
             body.mobile-map-open { overflow: hidden; }
             body.mobile-map-open .map-fab { z-index: 1101; }
-            body.mobile-map-open #mapWrapper {
+            body.mobile-map-open #mapWrapper,
+            body.mobile-map-open.tablet-pane-list #mapWrapper,
+            body.mobile-map-open.mode-split #mapWrapper,
+            html body.mobile-map-open.mode-split.tablet-pane-list #mapWrapper {
                 display: block !important;
                 position: fixed;
                 inset: 0;
@@ -3234,11 +3203,6 @@
             background: rgba(16, 185, 129, 0.12);
             border: 1px solid rgba(16, 185, 129, 0.3);
             color: #10b981;
-        }
-        .llm-active-banner.status-warn {
-            background: rgba(245, 158, 11, 0.12);
-            border: 1px solid rgba(245, 158, 11, 0.3);
-            color: #f59e0b;
         }
         .llm-active-banner.status-err {
             background: rgba(239, 68, 68, 0.12);

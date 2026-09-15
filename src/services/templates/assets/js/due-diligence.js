@@ -351,7 +351,7 @@ function getSeverityBadgeClass(sev) {
 // ========================
 let currentAiItem = null;
 
-function openAiModal(listingId) {
+async function openAiModal(listingId) {
     const item = allListings.find(i => i.id === listingId);
     if (!item) return;
     currentAiItem = item;
@@ -361,6 +361,19 @@ function openAiModal(listingId) {
     }
 
     document.getElementById('aiModalTitle').innerText = item.title || '';
+
+    // Lazy-load the full audit payload (land_audit, negotiation_arguments) once.
+    if (!item._detailLoaded) {
+        try {
+            const full = await Transport.listingDetail(listingId);
+            if (full && typeof full === 'object') {
+                Object.assign(item, full);
+                item._detailLoaded = true;
+            }
+        } catch (err) {
+            console.warn('Detail fetch failed, falling back to summary data:', err);
+        }
+    }
 
     // Recommendation
     const verdictSection = document.getElementById('aiVerdictSection');
