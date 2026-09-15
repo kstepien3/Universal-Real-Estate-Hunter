@@ -176,17 +176,33 @@
 
         <!-- ===== FILTERS POPOVER / BOTTOM SHEET ===== -->
         <div class="filters-popover" id="filtersPopover">
+            <div class="filters-sheet-handle" aria-hidden="true"></div>
             <div class="filters-popover-head">
                 <span>Filtry analityczne</span>
-                <button class="btn btn-ghost btn-sm" onclick="resetLiveFilters()">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-                        <path d="M3 3v5h5"></path>
-                    </svg>
-                    Resetuj
-                </button>
+                <div class="filters-popover-actions">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="resetLiveFilters()">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                            <path d="M3 3v5h5"></path>
+                        </svg>
+                        Resetuj
+                    </button>
+                    <button type="button" class="btn btn-sm filters-sheet-close" onclick="closeFiltersPopover()" aria-label="Zamknij filtry">
+                        Zamknij
+                    </button>
+                </div>
             </div>
             <div class="filters-grid">
+                <div class="field-group">
+                    <label for="filterPerspective">Perspektywa bazy</label>
+                    <select id="filterPerspective" onchange="setViewMode(this.value)">
+                        <option value="ALL">Cała baza</option>
+                        <option value="NEW_CYCLE">Ostatni przebieg</option>
+                        <option value="UPDATED_CYCLE">Korekty cen</option>
+                        <option value="TO_REVIEW">Do zbadania</option>
+                        <option value="CHECKED">Sprawdzone</option>
+                    </select>
+                </div>
                 <div class="field-group">
                     <label for="filterCategory">Kategoria</label>
                     <select id="filterCategory" onchange="applyFilters()">
