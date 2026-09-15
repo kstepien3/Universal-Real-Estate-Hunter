@@ -60,8 +60,13 @@
             document.body.classList.remove('mode-grid', 'mode-split', 'mode-map');
             document.body.classList.add('mode-' + mode);
             document.body.classList.remove('mobile-map-open');
-            document.body.classList.add('tablet-pane-list');
-            document.body.classList.remove('tablet-pane-map');
+            if (mode === 'map') {
+                document.body.classList.remove('tablet-pane-list');
+                document.body.classList.add('tablet-pane-map');
+            } else {
+                document.body.classList.add('tablet-pane-list');
+                document.body.classList.remove('tablet-pane-map');
+            }
 
             document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
             if (mode === 'grid') document.getElementById('btnViewGrid')?.classList.add('active');
@@ -1002,6 +1007,8 @@
             currentPerspective = perspectiveVal;
             const sel = document.getElementById('perspectiveSelect');
             if (sel) sel.value = perspectiveVal;
+            const selMob = document.getElementById('filterPerspective');
+            if (selMob) selMob.value = perspectiveVal;
             applyFilters();
         }
 
@@ -1018,17 +1025,20 @@
             const countChecked = items.filter(i => i.user_status === 'CHECKED').length;
 
             const pSel = document.getElementById('perspectiveSelect');
-            if (pSel) {
-                const setOpt = (val, txt) => {
-                    const o = pSel.querySelector(`option[value="${val}"]`);
-                    if (o) o.textContent = txt;
-                };
-                setOpt('ALL', `Cała baza (${countAll})`);
-                setOpt('NEW_CYCLE', `Ostatni przebieg (${countNew})`);
-                setOpt('UPDATED_CYCLE', `Korekty cen (${countUpdated})`);
-                setOpt('TO_REVIEW', `Do zbadania (${countReview})`);
-                setOpt('CHECKED', `Sprawdzone (${countChecked})`);
-            }
+            const pSelMob = document.getElementById('filterPerspective');
+            [pSel, pSelMob].forEach(s => {
+                if (s) {
+                    const setOpt = (val, txt) => {
+                        const o = s.querySelector(`option[value="${val}"]`);
+                        if (o) o.textContent = txt;
+                    };
+                    setOpt('ALL', `Cała baza (${countAll})`);
+                    setOpt('NEW_CYCLE', `Ostatni przebieg (${countNew})`);
+                    setOpt('UPDATED_CYCLE', `Korekty cen (${countUpdated})`);
+                    setOpt('TO_REVIEW', `Do zbadania (${countReview})`);
+                    setOpt('CHECKED', `Sprawdzone (${countChecked})`);
+                }
+            });
 
             let viewItems = items;
             if (currentPerspective === 'NEW_CYCLE') {
@@ -1110,6 +1120,9 @@
             if (document.getElementById('filterMinRooms')) document.getElementById('filterMinRooms').value = '';
             if (document.getElementById('filterMinYear')) document.getElementById('filterMinYear').value = '';
             if (document.getElementById('filterExactLoc')) document.getElementById('filterExactLoc').value = 'ALL';
+            if (document.getElementById('filterPerspective')) document.getElementById('filterPerspective').value = 'ALL';
+            if (document.getElementById('perspectiveSelect')) document.getElementById('perspectiveSelect').value = 'ALL';
+            currentPerspective = 'ALL';
             if (document.getElementById('searchInput')) document.getElementById('searchInput').value = '';
             setFilter('ALL');
         }
