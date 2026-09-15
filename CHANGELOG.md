@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.12.0 (2026-09-15)
+
+### Features
+
+- **ui**: Mobile-first overhaul for iphone 15 and responsive polish
+  ([`db6953b`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/db6953bef65a9d3789d588c8ff7167a0ba17a236))
+
+
 ## v1.11.1 (2026-09-14)
 
 ### Refactoring
