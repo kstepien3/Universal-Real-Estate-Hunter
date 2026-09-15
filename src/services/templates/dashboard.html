@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Panel analityczno-inwestycyjny Universal Real Estate Hunter: kwalifikacja ofert nieruchomości, audyt due diligence, geoportal i CRM w jednym miejscu.">
     <title>Universal Real Estate Hunter — Panel analityczno-inwestycyjny</title>
 
-    <!-- Leaflet Map CSS -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <!-- Leaflet Map CSS (Self-hosted) -->
+    <link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css">
 
     <link rel="stylesheet" href="/assets/dashboard.css">
 </head>
@@ -31,14 +32,14 @@
             <div class="brand-meta">
                 <div class="brand-title-row">
                     <h1 class="brand-title">Real Estate Hunter</h1>
-                    <span class="live-chip"><span class="live-dot" id="liveDot"></span>LIVE</span>
+                    <span class="live-chip"><span class="live-dot"></span>LIVE</span>
                 </div>
             </div>
         </div>
 
         <div class="topbar-center">
             <div class="profile-drop">
-                <button type="button" class="profile-drop-btn" id="profileDropBtn" onclick="toggleProfileMenu(event)" title="Aktywny profil wyszukiwania">
+                <button type="button" class="profile-drop-btn" onclick="toggleProfileMenu(event)" title="Aktywny profil wyszukiwania">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <circle cx="12" cy="12" r="9"></circle>
                         <path d="M3 12h18"></path>
@@ -94,7 +95,7 @@
     <div class="container">
 
         <!-- ===== COMMAND BAR: Row 2 (Pipeline + Search + Views + Filters) ===== -->
-        <section class="command-bar" id="commandBar">
+        <section class="command-bar">
             <div class="pipeline">
                 <button class="pipe-item active" data-filter="ALL" onclick="setFilter('ALL', this)">Wszystkie <b id="stTotal">0</b></button>
                 <button class="pipe-item" data-filter="NEW" onclick="setFilter('NEW', this)" title="Oferty z ostatniego przebiegu">Nowe <b id="stNew">0</b></button>
@@ -119,7 +120,7 @@
             </div>
 
             <div class="command-controls">
-                <button class="btn btn-sm filters-btn" id="btnOpenFilters" onclick="toggleFiltersPopover(event)" aria-haspopup="dialog" title="Wszystkie filtry">
+                <button class="btn btn-sm filters-btn" onclick="toggleFiltersPopover(event)" aria-haspopup="dialog" title="Wszystkie filtry">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M4 21v-7"></path>
                         <path d="M4 10V3"></path>
@@ -146,7 +147,7 @@
                         <option value="drop_desc">Obniżki cen</option>
                     </select>
                 </div>
-                <div class="segmented-switcher" role="tablist" aria-label="Widok">
+                <div class="segmented-switcher" role="group" aria-label="Widok">
                     <button class="view-btn" id="btnViewGrid" onclick="switchViewMode('grid')" title="Siatka kafelków">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="7" height="7" rx="1"></rect>
@@ -311,7 +312,7 @@
 
         <!-- ===== SCRAPE PROGRESS STRIP (RWD: collapsible + bottom-sheet on mobile) ===== -->
         <section id="progressPanel" class="progress-strip" style="display:none;">
-            <div class="progress-strip-row" id="progressStripRow" onclick="toggleProgressPanel(event)" role="button" tabindex="0" aria-label="Zwiń lub rozwiń dziennik synchronizacji" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProgressPanel(event);}">
+            <div class="progress-strip-row" onclick="toggleProgressPanel(event)" role="button" tabindex="0" aria-label="Zwiń lub rozwiń dziennik synchronizacji" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProgressPanel(event);}">
                 <span class="live-dot" aria-hidden="true"></span>
                 <span id="progStep" class="progress-step">Pobieranie ofert…</span>
                 <span id="progPortal" class="progress-portal"></span>
@@ -349,18 +350,6 @@
             <div id="progLogs" class="prog-logs"></div>
         </section>
 
-        <!-- Legacy compatibility counters (hidden) -->
-        <span id="cntAll" style="display:none"></span>
-        <span id="cntFav" style="display:none"></span>
-        <span id="cntVisit" style="display:none"></span>
-        <span id="cntWl" style="display:none"></span>
-        <span id="cntQual" style="display:none"></span>
-        <span id="vpbCountAll" style="display:none"></span>
-        <span id="vpbCountNew" style="display:none"></span>
-        <span id="vpbCountUpdated" style="display:none"></span>
-        <span id="vpbCountReview" style="display:none"></span>
-        <span id="vpbCountChecked" style="display:none"></span>
-
         <!-- ===== WORKSPACE ===== -->
         <main id="appWorkspace">
             <div id="mapWrapper">
@@ -388,7 +377,7 @@
     </div>
 
     <!-- ===== TABLET PANE TOGGLE ===== -->
-    <div class="workspace-toggle" id="workspaceToggle">
+    <div class="workspace-toggle">
         <button id="tglList" class="active" onclick="tabletShow('list')">Pokaż listę (<span id="tglListCount">0</span>)</button>
         <button id="tglMap" onclick="tabletShow('map')">Pokaż mapę</button>
     </div>
@@ -465,7 +454,7 @@
                                 </svg>
                                 <span>Duplikuj</span>
                             </button>
-                            <button type="button" class="btn btn-sm btn-danger config-profile-delete" id="btnDeleteProfile" onclick="deleteCurrentProfile()" title="Usuń profil" aria-label="Usuń profil">
+                            <button type="button" class="btn btn-sm btn-danger config-profile-delete" onclick="deleteCurrentProfile()" title="Usuń profil" aria-label="Usuń profil">
                                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M3 6h18"></path>
                                     <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
@@ -920,12 +909,12 @@
                     </div>
 
                     <!-- Zunifikowany Lokalny Silnik AI (Ollama / LM Studio / vLLM / Docker) -->
-                    <div class="config-field" id="localAiSection" style="margin-top:14px;">
+                    <div class="config-field" style="margin-top:14px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                             <label style="margin-bottom:0;">Lokalny silnik AI na Twoim komputerze:</label>
                             <span id="localPresetBadge" style="font-size:11px;color:var(--text-muted);">Preset: Ollama</span>
                         </div>
-                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;" id="localPresetBtns">
+                        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
                             <button type="button" class="btn btn-sm" id="btnPresetOllama" onclick="setLocalEnginePreset('ollama')">Ollama (:11434)</button>
                             <button type="button" class="btn btn-sm" id="btnPresetLmStudio" onclick="setLocalEnginePreset('lmstudio')">LM Studio (:1234)</button>
                             <button type="button" class="btn btn-sm" id="btnPresetVllm" onclick="setLocalEnginePreset('vllm')">vLLM (:8000)</button>
@@ -943,7 +932,7 @@
                                 <input type="number" id="cfgLocalTimeout" placeholder="180" step="10" min="10" style="width:100%;">
                             </div>
                         </div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;margin-bottom:10px;" id="localUrlHint">
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;margin-bottom:10px;">
                             W Dockerze użyj <code>http://host.docker.internal:...</code>. Większe modele mogą potrzebować dłuższego timeoutu.
                         </div>
 
@@ -991,7 +980,7 @@
                     </div>
 
                     <!-- Konfiguracja Chmurowa (OpenRouter / OpenAI) -->
-                    <div class="config-field" id="openrouterModelField" style="margin-top:14px;">
+                    <div class="config-field" style="margin-top:14px;">
                         <div class="config-row2">
                             <div class="config-field">
                                 <label for="cfgOpenRouterModel">Model dla OpenRouter (chmura):</label>
@@ -1234,10 +1223,10 @@
     <!-- Notification Toast -->
     <div id="toast">Powiadomienie</div>
 
-    <!-- Leaflet Map JS -->
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
-    <script src="/assets/js/transport.js"></script>
-    <script src="/assets/js/dashboard.js"></script>
-    <script src="/assets/js/due-diligence.js"></script>
+    <!-- Leaflet Map JS (Self-hosted) -->
+    <script src="/assets/vendor/leaflet/leaflet.js" defer></script>
+    <script src="/assets/js/transport.js" defer></script>
+    <script src="/assets/js/dashboard.js" defer></script>
+    <script src="/assets/js/due-diligence.js" defer></script>
 </body>
 </html>

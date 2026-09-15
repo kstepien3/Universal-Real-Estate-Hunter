@@ -45,6 +45,16 @@ def isolate_shared_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
 
 @pytest.fixture(autouse=True)
+def isolate_medians_cache():
+    """Reset the in-process market-medians cache so it can't leak between tests."""
+    from src.storage.repository import clear_medians_cache
+
+    clear_medians_cache()
+    yield
+    clear_medians_cache()
+
+
+@pytest.fixture(autouse=True)
 def mock_default_air_quality(monkeypatch: pytest.MonkeyPatch):
     """Prevent unexpected external CAMS/GIOŚ network calls during tests."""
     from typing import Any

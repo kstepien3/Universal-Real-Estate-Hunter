@@ -1,14 +1,17 @@
 import asyncio
 import hashlib
 import json
+import re
 import webbrowser
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
+import aiohttp
 from aiohttp import web
 from loguru import logger
-from sqlalchemy import and_, desc, or_, select
+from sqlalchemy import and_, desc, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.services.config_manager import config_manager
@@ -55,18 +58,120 @@ else:
     INDEX_HTML = "<!DOCTYPE html><html><body><h1>Dashboard template not found</h1></body></html>"
 
 
+_ASSET_URL_RE = re.compile(r'(src|href)="(/assets/[^"]+)"')
+
+
+def _asset_version(rel_path: str) -> str:
+    """Return a short content hash for an asset file (empty if missing)."""
+    try:
+        asset = (ASSET_DIR / rel_path).resolve()
+    except (OSError, ValueError):
+        return ""
+    if not asset.is_relative_to(ASSET_DIR.resolve()) or not asset.is_file():
+        return ""
+    return hashlib.md5(asset.read_bytes(), usedforsecurity=False).hexdigest()[:12]
+
+
+# Fields the list endpoint omits (cards/filters never read them; the Due Diligence
+# drawer re-fetches the full record via /api/listings/{id}). Keeps /api/listings lean.
+_LIST_OMIT_FIELDS = (
+    "ai_summary",
+    "ai_verdict",
+    "ai_questions",
+    "worth_interest",
+    "contact_phone",
+    "contact_person",
+    "air_pm25_summer_avg",
+    "air_gios_station",
+    "air_gios_dist_km",
+    "air_gios_index",
+    "terrain_slope_pct",
+    "terrain_aspect",
+    "walkability_pka_dist_m",
+    "walkability_pka_name",
+    "power_lines_risk",
+    "broadband_details",
+    "nature_protected_zone",
+    "monument_zone",
+    "cemetery_buffer_zone",
+    "noise_level_db",
+    "noise_zone",
+    "egib_building_status",
+    "egib_soil_class",
+    "cadastral_area",
+    "mpzp_status",
+    "initial_price",
+    "price_history_count",
+    "first_seen_at",
+)
+
+
+# Image proxy: host allow-list (suffix match) prevents open-proxy / SSRF abuse.
+_ALLOWED_IMAGE_HOST_SUFFIXES = (
+    "olxcdn.com",
+    "staticmorizon.com.pl",
+    "nieruchomosci-online.pl",
+    "otodom.pl",
+    "otodomcdn.com",
+    "unsplash.com",
+)
+_IMG_MAX_BYTES = 8 * 1024 * 1024
+_IMG_FETCH_TIMEOUT_SECONDS = 12.0
+
+
+def _img_cache_dir() -> Path:
+    """Resolve the on-disk image cache next to the SQLite DB (data/img_cache)."""
+    from config import settings
+
+    url = settings.DATABASE_URL or ""
+    if url.startswith("sqlite"):
+        db_path = url.split(":///", 1)[-1].strip("/")
+        if db_path:
+            parent = Path(db_path).parent
+            if str(parent) not in (".", ""):
+                return parent / "img_cache"
+    return Path("data") / "img_cache"
+
+
+def _is_allowed_image_host(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    if not host:
+        return False
+    return any(host == suffix or host.endswith("." + suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES)
+
+
+def _infer_image_content_type(upstream_ct: str | None) -> str:
+    ct = (upstream_ct or "").split(";")[0].strip().lower()
+    return ct if ct.startswith("image/") else "image/jpeg"
+
+
 class LiveDashboardServer:
+    @staticmethod
+    @web.middleware
+    async def _compression_middleware(request: web.Request, handler: Any) -> web.StreamResponse:
+        resp = await handler(request)
+        if isinstance(resp, web.Response) and resp.body and not (resp.content_type or "").startswith("image/"):
+            resp.enable_compression()
+        return resp
+
     def __init__(self, host: str = "0.0.0.0", port: int = 8080):
         self.host = host
         self.port = port
-        self.app = web.Application()
+        self.app = web.Application(middlewares=[self._compression_middleware])
         self._active_scrape_task: asyncio.Task[Any] | None = None
+        self._listings_cache: dict[str, tuple[str, str, bytes]] = {}
+        self._http: aiohttp.ClientSession | None = None
+        self._img_inflight: dict[str, asyncio.Task[Any]] = {}
+        self._img_cache_dir = _img_cache_dir()
+        self._img_cache_dir.mkdir(parents=True, exist_ok=True)
         self._setup_routes()
 
     def _setup_routes(self):
         self.app.router.add_get("/", self.handle_index)
+        self.app.router.add_get("/img", self.handle_image_proxy)
         self.app.router.add_get("/assets/{path:.*}", self.handle_assets)
         self.app.router.add_get("/api/listings", self.handle_get_listings)
+        self.app.router.add_get("/api/listings/{id}", self.handle_get_listing_detail)
         self.app.router.add_get("/api/listings/{id}/price-history", self.handle_get_price_history)
         self.app.router.add_get("/api/listings/{id}/air-quality", self.handle_get_air_quality)
         self.app.router.add_patch("/api/listings/{id}/status", self.handle_update_status)
@@ -362,7 +467,17 @@ class LiveDashboardServer:
                 content = TEMPLATE_PATH.read_text(encoding="utf-8")
             except Exception as e:
                 logger.warning(f"Could not read template dynamically: {e}")
+        content = _ASSET_URL_RE.sub(self._version_asset_ref, content)
         return web.Response(text=content, content_type="text/html", charset="utf-8")
+
+    @staticmethod
+    def _version_asset_ref(match: re.Match[str]) -> str:
+        attr = match.group(1)
+        path = match.group(2)
+        version = _asset_version(path.removeprefix("/assets/"))
+        if not version:
+            return match.group(0)
+        return f'{attr}="{path}?v={version}"'
 
     async def handle_assets(self, request: web.Request) -> web.Response:
         rel = str(request.match_info.get("path", ""))
@@ -379,8 +494,76 @@ class LiveDashboardServer:
             body=content,
             content_type=ctype,
             charset=None,
-            headers={"ETag": etag, "Cache-Control": "no-cache"},
+            headers={"ETag": etag, "Cache-Control": "public, max-age=31536000, immutable"},
         )
+
+    async def handle_image_proxy(self, request: web.Request) -> web.Response:
+        """Proxy + on-disk cache for listing images (removes third-party cookies, unifies caching)."""
+        raw_url = request.query.get("url", "")
+        parsed = urlparse(raw_url)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            return web.Response(status=400, text="Invalid image URL")
+        if not _is_allowed_image_host(raw_url):
+            return web.Response(status=403, text="Image host not allowed")
+
+        cache_key = hashlib.md5(raw_url.encode("utf-8"), usedforsecurity=False).hexdigest()
+        cache_path = self._img_cache_dir / cache_key
+        meta_path = self._img_cache_dir / f"{cache_key}.ct"
+
+        if cache_path.is_file():
+            return self._serve_image_file(cache_path, meta_path, request)
+
+        # Single-flight: concurrent requests for the same image share one fetch.
+        task = self._img_inflight.get(cache_key)
+        if task is None:
+            task = asyncio.create_task(self._fetch_image(raw_url, cache_path, meta_path))
+            self._img_inflight[cache_key] = task
+            task.add_done_callback(lambda _t: self._img_inflight.pop(cache_key, None))
+        try:
+            await asyncio.shield(task)
+        except Exception:
+            pass
+
+        if cache_path.is_file():
+            return self._serve_image_file(cache_path, meta_path, request)
+        return web.Response(status=502, text="Image fetch failed")
+
+    @staticmethod
+    def _serve_image_file(cache_path: Path, meta_path: Path, request: web.Request) -> web.Response:
+        content = cache_path.read_bytes()
+        etag = f'"{cache_path.stem}"'
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(status=304)
+        content_type = "image/jpeg"
+        try:
+            content_type = meta_path.read_text(encoding="utf-8").strip() or content_type
+        except OSError:
+            pass
+        return web.Response(
+            body=content,
+            content_type=content_type,
+            headers={"ETag": etag, "Cache-Control": "public, max-age=31536000, immutable"},
+        )
+
+    async def _fetch_image(self, url: str, cache_path: Path, meta_path: Path) -> None:
+        try:
+            if self._http is None:
+                self._http = aiohttp.ClientSession()
+            timeout = aiohttp.ClientTimeout(total=_IMG_FETCH_TIMEOUT_SECONDS)
+            async with self._http.get(url, timeout=timeout) as resp:
+                if resp.status != 200:
+                    return
+                content_type = resp.headers.get("Content-Type")
+                data = await resp.read()
+            if len(data) > _IMG_MAX_BYTES:
+                return
+            final_ct = _infer_image_content_type(content_type)
+            tmp_path = cache_path.with_name(cache_path.name + ".tmp")
+            tmp_path.write_bytes(data)
+            tmp_path.replace(cache_path)
+            meta_path.write_text(final_ct, encoding="utf-8")
+        except Exception:
+            return
 
     async def handle_get_price_history(self, request: web.Request) -> web.Response:
         listing_id = int(request.match_info["id"])
@@ -421,8 +604,239 @@ class LiveDashboardServer:
             aq_data = await air_quality_service.get_air_quality_audit(item.latitude, item.longitude)
             return web.json_response(aq_data)
 
+    @staticmethod
+    def _clean_image_urls(urls: list[str]) -> list[str]:
+        """Drop non-photo assets (logos, SVGs) that leak into listing galleries."""
+        cleaned: list[str] = []
+        for u in urls or []:
+            if not isinstance(u, str) or not u:
+                continue
+            low = u.lower()
+            if low.endswith(".svg") or "/nuxt-assets/" in low:
+                continue
+            cleaned.append(u)
+        return cleaned
+
+    def _build_listing_dict(
+        self,
+        item: ListingModel,
+        *,
+        market_medians: dict[str, Any],
+        now_utc: datetime,
+        max_scraped_at: datetime | None,
+        detail: bool,
+    ) -> dict[str, Any]:
+        """Serialize a listing. `detail=False` omits heavy audit blobs (land_audit,
+        negotiation_arguments) and exposes only the `capex_total` scalar used by cards."""
+        price_drop_amount = None
+        price_drop_pct = None
+        initial_price = None
+        ph = item.price_history or []
+        if len(ph) >= 2:
+            oldest = ph[-1]
+            initial_price = oldest.price
+            if initial_price and initial_price > item.price:
+                price_drop_amount = round(initial_price - item.price)
+                price_drop_pct = round((price_drop_amount / initial_price) * 100, 1)
+
+        created_utc = _as_utc(item.created_at)
+        updated_utc = _as_utc(item.updated_at)
+
+        is_new_cycle = bool(
+            created_utc
+            and (
+                (max_scraped_at is not None and (max_scraped_at - created_utc).total_seconds() <= 10800)
+                or (now_utc - created_utc).total_seconds() <= 86400
+            )
+        )
+
+        is_updated_cycle = bool(
+            not is_new_cycle
+            and (
+                len(ph) >= 2
+                or (
+                    updated_utc
+                    and created_utc
+                    and (updated_utc - created_utc).total_seconds() > 300
+                    and (
+                        (max_scraped_at is not None and (max_scraped_at - updated_utc).total_seconds() <= 10800)
+                        or (now_utc - updated_utc).total_seconds() <= 86400
+                    )
+                )
+            )
+        )
+
+        valuation = valuation_engine.evaluate(
+            listing=item,
+            market_medians=market_medians,
+            price_drop_amount=float(price_drop_amount or 0.0),
+            price_drop_pct=float(price_drop_pct or 0.0),
+            price_history_count=len(ph),
+        )
+        vd = valuation.to_dashboard_dict()
+        land_audit = vd.get("land_audit") or {}
+        capex_total = (land_audit.get("tco_audit") or {}).get("total_acquisition_cost")
+
+        data: dict[str, Any] = {
+            "id": item.id,
+            "portal": item.portal,
+            "portal_id": item.portal_id,
+            "url": item.url,
+            "title": item.title,
+            "price": item.price,
+            "price_per_m2": item.price_per_m2,
+            "area_home": item.area_home,
+            "area_plot": item.area_plot,
+            "building_type": item.building_type,
+            "segment_subtype": item.segment_subtype,
+            "location_raw": item.location_raw,
+            "street": item.street,
+            "district": item.district,
+            "city": item.city,
+            "latitude": item.latitude,
+            "longitude": item.longitude,
+            "is_exact_coords": item.is_exact_coords,
+            "parcel_id": item.parcel_id,
+            "cadastral_area": item.cadastral_area,
+            "geoportal_url": item.geoportal_url,
+            "mpzp_zone": item.mpzp_zone,
+            "mpzp_status": item.mpzp_status,
+            "flood_risk_zone": item.flood_risk_zone,
+            "landslide_risk": item.landslide_risk,
+            "egib_building_status": item.egib_building_status,
+            "egib_soil_class": item.egib_soil_class,
+            "noise_level_db": item.noise_level_db,
+            "noise_zone": item.noise_zone,
+            "nature_protected_zone": item.nature_protected_zone,
+            "monument_zone": item.monument_zone,
+            "cemetery_buffer_zone": item.cemetery_buffer_zone,
+            "broadband_status": item.broadband_status,
+            "broadband_details": item.broadband_details,
+            "parcel_front_width_m": item.parcel_front_width_m,
+            "parcel_length_m": item.parcel_length_m,
+            "parcel_aspect_ratio": item.parcel_aspect_ratio,
+            "parcel_shape_type": item.parcel_shape_type,
+            "terrain_slope_pct": item.terrain_slope_pct,
+            "terrain_aspect": item.terrain_aspect,
+            "walkability_pka_dist_m": item.walkability_pka_dist_m,
+            "walkability_pka_name": item.walkability_pka_name,
+            "power_lines_risk": item.power_lines_risk,
+            "gesut_networks": item.gesut_networks_data,
+            "air_aqi": item.air_aqi,
+            "air_aqi_label": item.air_aqi_label,
+            "air_pm25_heating_avg": item.air_pm25_heating_avg,
+            "air_pm25_summer_avg": item.air_pm25_summer_avg,
+            "air_smog_days": item.air_smog_days,
+            "air_gios_station": item.air_gios_station,
+            "air_gios_dist_km": item.air_gios_dist_km,
+            "air_gios_index": item.air_gios_index,
+            "air_smog_risk": item.air_smog_risk,
+            "user_status": item.user_status or "NEW",
+            "user_notes": item.user_notes or "",
+            "access_road_type": item.access_road_type,
+            "market": item.market,
+            "finish_condition": item.finish_condition or "nieokreślony",
+            "has_visualisations": item.has_visualisations,
+            "sewerage": item.sewerage,
+            "heating": item.heating,
+            "has_fiber": item.has_fiber,
+            "year_built": item.year_built,
+            "category": item.category or "dom",
+            "rooms": item.rooms,
+            "floor": item.floor,
+            "floors_in_building": item.floors_in_building,
+            "is_private_owner": item.is_private_owner,
+            "profile_id": item.profile_id or "default",
+            "profile_name": item.profile_name,
+            "main_image_url": item.main_image_url,
+            "gallery_images": self._clean_image_urls(item.gallery_images),
+            "is_qualified": item.is_qualified,
+            "qualification_status": item.qualification_status,
+            "qualification_score": item.qualification_score,
+            "filter_reasons": item.filter_reasons,
+            "pros": item.pros,
+            "cons": item.cons,
+            "created_at": item.created_at.isoformat() if item.created_at else None,
+            "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+            "last_scraped_at": item.last_scraped_at.isoformat() if item.last_scraped_at else None,
+            "is_new_cycle": is_new_cycle,
+            "is_updated_cycle": is_updated_cycle,
+            "ai_summary": item.ai_summary,
+            "ai_verdict": item.ai_verdict,
+            "worth_interest": item.worth_interest,
+            "ai_questions": item.ai_questions,
+            "contact_phone": item.contact_phone,
+            "contact_person": item.contact_person,
+            "listing_status": getattr(item, "listing_status", None) or "ACTIVE",
+            "relist_count": getattr(item, "relist_count", 0) or 0,
+            "first_seen_at": item.first_seen_at.isoformat() if item.first_seen_at is not None else None,
+            "price_drop_amount": price_drop_amount,
+            "price_drop_pct": price_drop_pct,
+            "initial_price": getattr(item, "initial_price", None) or initial_price,
+            "price_history_count": len(ph),
+            "capex_total": capex_total,
+        }
+
+        # Spread scalar valuation fields (skip the heavy detail-only blobs).
+        for key, val in vd.items():
+            if key not in ("land_audit", "negotiation_arguments"):
+                data[key] = val
+
+        if detail:
+            data["land_audit"] = land_audit
+            data["negotiation_arguments"] = vd.get("negotiation_arguments") or []
+        else:
+            for key in _LIST_OMIT_FIELDS:
+                data.pop(key, None)
+
+        return data
+
+    async def handle_get_listing_detail(self, request: web.Request) -> web.Response:
+        try:
+            listing_id = int(request.match_info["id"])
+        except (KeyError, ValueError):
+            return web.json_response({"error": "Nieprawidłowy identyfikator oferty"}, status=400)
+
+        async with get_session() as session:
+            stmt = (
+                select(ListingModel)
+                .options(selectinload(ListingModel.price_history))
+                .where(ListingModel.id == listing_id)
+            )
+            res = await session.execute(stmt)
+            item = res.scalars().one_or_none()
+            if not item:
+                return web.json_response({"error": "Listing not found"}, status=404)
+
+            repo = ListingRepository(session)
+            market_medians = await repo.get_market_medians()
+            now_utc = datetime.now(UTC)
+            data = self._build_listing_dict(
+                item,
+                market_medians=market_medians,
+                now_utc=now_utc,
+                max_scraped_at=_as_utc(item.last_scraped_at),
+                detail=True,
+            )
+            return web.json_response(data)
+
     async def handle_get_listings(self, request: web.Request) -> web.Response:
         prof_filter = request.query.get("profile")
+        cache_key = (prof_filter or "").strip().lower()
+
+        # Cheap global dirty-check: count + max(updated_at) change on any add/update/delete,
+        # so a 45s poll can be answered from cache without re-querying or re-serializing.
+        async with get_session() as session:
+            row = (await session.execute(select(func.count(), func.max(ListingModel.updated_at)))).one()
+        fingerprint = f"{int(row[0] or 0)}:{row[1]}"
+
+        cached = self._listings_cache.get(cache_key)
+        if cached is not None and cached[0] == fingerprint:
+            _, etag, body = cached
+            if request.headers.get("If-None-Match") == etag:
+                return web.Response(status=304)
+            return web.Response(body=body, content_type="application/json", headers={"ETag": etag})
+
         async with get_session() as session:
             stmt = select(ListingModel).options(selectinload(ListingModel.price_history))
             if prof_filter and prof_filter.upper() != "ALL":
@@ -464,163 +878,19 @@ class LiveDashboardServer:
 
             data: list[dict[str, Any]] = []
             for item in items:
-                # Compute price drop from price_history
-                price_drop_amount = None
-                price_drop_pct = None
-                initial_price = None
-                ph = item.price_history or []
-                if len(ph) >= 2:
-                    # price_history ordered desc by recorded_at, so last entry = oldest
-                    oldest = ph[-1]
-                    initial_price = oldest.price
-                    if initial_price and initial_price > item.price:
-                        price_drop_amount = round(initial_price - item.price)
-                        price_drop_pct = round((price_drop_amount / initial_price) * 100, 1)
-
-                # Delta analysis (cycle additions & updates)
-                created_utc = _as_utc(item.created_at)
-                updated_utc = _as_utc(item.updated_at)
-
-                is_new_cycle = bool(
-                    created_utc
-                    and (
-                        (max_scraped_at is not None and (max_scraped_at - created_utc).total_seconds() <= 10800)
-                        or (now_utc - created_utc).total_seconds() <= 86400
-                    )
-                )
-
-                is_updated_cycle = bool(
-                    not is_new_cycle
-                    and (
-                        len(ph) >= 2
-                        or (
-                            updated_utc
-                            and created_utc
-                            and (updated_utc - created_utc).total_seconds() > 300
-                            and (
-                                (max_scraped_at is not None and (max_scraped_at - updated_utc).total_seconds() <= 10800)
-                                or (now_utc - updated_utc).total_seconds() <= 86400
-                            )
-                        )
-                    )
-                )
-
-                valuation = valuation_engine.evaluate(
-                    listing=item,
-                    market_medians=market_medians,
-                    price_drop_amount=float(price_drop_amount or 0.0),
-                    price_drop_pct=float(price_drop_pct or 0.0),
-                    price_history_count=len(ph),
-                )
-
                 data.append(
-                    {
-                        "id": item.id,
-                        "portal": item.portal,
-                        "portal_id": item.portal_id,
-                        "url": item.url,
-                        "title": item.title,
-                        "price": item.price,
-                        "price_per_m2": item.price_per_m2,
-                        "area_home": item.area_home,
-                        "area_plot": item.area_plot,
-                        "building_type": item.building_type,
-                        "segment_subtype": item.segment_subtype,
-                        "location_raw": item.location_raw,
-                        "street": item.street,
-                        "district": item.district,
-                        "city": item.city,
-                        "latitude": item.latitude,
-                        "longitude": item.longitude,
-                        "is_exact_coords": item.is_exact_coords,
-                        "parcel_id": item.parcel_id,
-                        "cadastral_area": item.cadastral_area,
-                        "geoportal_url": item.geoportal_url,
-                        "mpzp_zone": item.mpzp_zone,
-                        "mpzp_status": item.mpzp_status,
-                        "flood_risk_zone": item.flood_risk_zone,
-                        "landslide_risk": item.landslide_risk,
-                        "egib_building_status": item.egib_building_status,
-                        "egib_soil_class": item.egib_soil_class,
-                        "noise_level_db": item.noise_level_db,
-                        "noise_zone": item.noise_zone,
-                        "nature_protected_zone": item.nature_protected_zone,
-                        "monument_zone": item.monument_zone,
-                        "cemetery_buffer_zone": item.cemetery_buffer_zone,
-                        "broadband_status": item.broadband_status,
-                        "broadband_details": item.broadband_details,
-                        "parcel_front_width_m": item.parcel_front_width_m,
-                        "parcel_length_m": item.parcel_length_m,
-                        "parcel_aspect_ratio": item.parcel_aspect_ratio,
-                        "parcel_shape_type": item.parcel_shape_type,
-                        "terrain_slope_pct": item.terrain_slope_pct,
-                        "terrain_aspect": item.terrain_aspect,
-                        "walkability_pka_dist_m": item.walkability_pka_dist_m,
-                        "walkability_pka_name": item.walkability_pka_name,
-                        "power_lines_risk": item.power_lines_risk,
-                        "gesut_networks": item.gesut_networks_data,
-                        "air_aqi": item.air_aqi,
-                        "air_aqi_label": item.air_aqi_label,
-                        "air_pm25_heating_avg": item.air_pm25_heating_avg,
-                        "air_pm25_summer_avg": item.air_pm25_summer_avg,
-                        "air_smog_days": item.air_smog_days,
-                        "air_gios_station": item.air_gios_station,
-                        "air_gios_dist_km": item.air_gios_dist_km,
-                        "air_gios_index": item.air_gios_index,
-                        "air_smog_risk": item.air_smog_risk,
-                        "user_status": item.user_status or "NEW",
-                        "user_notes": item.user_notes or "",
-                        "access_road_type": item.access_road_type,
-                        "market": item.market,
-                        "finish_condition": item.finish_condition or "nieokreślony",
-                        "has_visualisations": item.has_visualisations,
-                        "sewerage": item.sewerage,
-                        "heating": item.heating,
-                        "has_fiber": item.has_fiber,
-                        "year_built": item.year_built,
-                        "category": item.category or "dom",
-                        "rooms": item.rooms,
-                        "floor": item.floor,
-                        "floors_in_building": item.floors_in_building,
-                        "is_private_owner": item.is_private_owner,
-                        "profile_id": item.profile_id or "default",
-                        "profile_name": item.profile_name,
-                        "main_image_url": item.main_image_url,
-                        "gallery_images": item.gallery_images,
-                        "is_qualified": item.is_qualified,
-                        "qualification_status": item.qualification_status,
-                        "qualification_score": item.qualification_score,
-                        "filter_reasons": item.filter_reasons,
-                        "pros": item.pros,
-                        "cons": item.cons,
-                        "created_at": item.created_at.isoformat() if item.created_at else None,
-                        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
-                        "last_scraped_at": item.last_scraped_at.isoformat() if item.last_scraped_at else None,
-                        "is_new_cycle": is_new_cycle,
-                        "is_updated_cycle": is_updated_cycle,
-                        # AI Due Diligence
-                        "ai_summary": item.ai_summary,
-                        "ai_verdict": item.ai_verdict,
-                        "worth_interest": item.worth_interest,
-                        "ai_questions": item.ai_questions,
-                        "contact_phone": item.contact_phone,
-                        "contact_person": item.contact_person,
-                        # Re-listing & Lifecycle
-                        "listing_status": getattr(item, "listing_status", None) or "ACTIVE",
-                        "relist_count": getattr(item, "relist_count", 0) or 0,
-                        "first_seen_at": item.first_seen_at.isoformat() if item.first_seen_at is not None else None,
-                        # Price Drop History
-                        "price_drop_amount": price_drop_amount,
-                        "price_drop_pct": price_drop_pct,
-                        "initial_price": getattr(item, "initial_price", None) or initial_price,
-                        "price_history_count": len(ph),
-                        # Negotiation & Market Intelligence & Automated Audits
-                        **valuation.to_dashboard_dict(),
-                    }
+                    self._build_listing_dict(
+                        item,
+                        market_medians=market_medians,
+                        now_utc=now_utc,
+                        max_scraped_at=max_scraped_at,
+                        detail=False,
+                    )
                 )
 
             body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
+            self._listings_cache[cache_key] = (fingerprint, etag, body)
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304)
             return web.json_response(body=body, headers={"ETag": etag})
@@ -889,6 +1159,7 @@ class LiveDashboardServer:
         finally:
             self._active_scrape_task = None
             clear_medians_cache()
+            self._listings_cache.clear()
 
     async def handle_trigger_scrape(self, request: web.Request) -> web.Response:
         from src.services.progress import global_tracker
@@ -1004,4 +1275,6 @@ class LiveDashboardServer:
             pass
         finally:
             await runner.cleanup()
+            if self._http is not None:
+                await self._http.close()
             logger.info("[LiveDashboard] Serwer zatrzymany.")

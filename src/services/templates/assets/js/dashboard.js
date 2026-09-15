@@ -46,6 +46,20 @@
             markersGroup = L.featureGroup().addTo(map);
         }
 
+        function ensureMapInitialized() {
+            const mw = document.getElementById('mapWrapper');
+            if (mw && mw.offsetWidth === 0 && mw.offsetHeight === 0) return;
+            if (map) {
+                setTimeout(() => map.invalidateSize(), 150);
+                return;
+            }
+            const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
+            const center = curProf ? getCityCenter(curProf.city) : [52.0693, 19.4803];
+            initLeafletMap(center);
+            renderMapMarkers(computeFilteredItems());
+            setTimeout(() => map.invalidateSize(), 200);
+        }
+
         function syncTabletToggle() {
             const tglList = document.getElementById('tglList');
             const tglMap = document.getElementById('tglMap');
@@ -75,6 +89,7 @@
 
             syncTabletToggle();
             syncMapFab();
+            ensureMapInitialized();
 
             setTimeout(() => {
                 if (map) map.invalidateSize();
@@ -85,6 +100,7 @@
             document.body.classList.toggle('tablet-pane-map', pane === 'map');
             document.body.classList.toggle('tablet-pane-list', pane === 'list');
             syncTabletToggle();
+            if (pane === 'map') ensureMapInitialized();
             setTimeout(() => {
                 if (map) map.invalidateSize();
             }, 150);
@@ -98,6 +114,7 @@
                 fab.setAttribute('aria-label', open ? 'Pokaż listę ofert' : 'Pokaż pełnoekranową mapę');
                 fab.setAttribute('aria-pressed', open ? 'true' : 'false');
             }
+            if (open) ensureMapInitialized();
             setTimeout(() => {
                 if (map) map.invalidateSize();
             }, 250);
@@ -1062,26 +1079,15 @@
             const newCnt = viewItems.filter(i => i.is_new_cycle).length;
 
             safeSet('stTotal', total);
-            safeSet('cntAll', total);
             safeSet('cntTotalAll', total);
             safeSet('stNew', newCnt);
             safeSet('stFavorite', favs);
-            safeSet('cntFav', favs);
             safeSet('stToVisit', toVisit);
-            safeSet('cntVisit', toVisit);
             safeSet('stWhitelist', wl);
-            safeSet('cntWl', wl);
             safeSet('stQualified', qual);
-            safeSet('cntQual', qual);
             safeSet('cntRev', rev);
             safeSet('cntBorder', border);
             safeSet('cntRej', rej);
-
-            safeSet('vpbCountAll', countAll);
-            safeSet('vpbCountNew', countNew);
-            safeSet('vpbCountUpdated', countUpdated);
-            safeSet('vpbCountReview', countReview);
-            safeSet('vpbCountChecked', countChecked);
 
             const priced = viewItems.filter(i => i.price_per_m2 > 0);
             const avg = priced.length > 0 ? priced.reduce((acc, c) => acc + c.price_per_m2, 0) / priced.length : 0;
@@ -1396,7 +1402,8 @@
             const marker = L.marker([jitterLat, jitterLon], { icon: icon });
 
             const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=400&q=80";
-            const imgSrc = item.main_image_url || fallbackImg;
+            const fullImg = item.main_image_url || fallbackImg;
+            const imgSrc = thumbUrl(item.main_image_url) || fallbackImg;
             const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : 'b/d';
             const precisionText = item.is_exact_coords ? 'Lokalizacja dokładna' : 'Lokalizacja przybliżona (rejon)';
             const precisionColor = item.is_exact_coords ? 'var(--slate-text)' : 'var(--amber-text)';
@@ -1406,7 +1413,7 @@
 
             const popupHtml = `
                 <div class="popup-card">
-                    <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.src='${fallbackImg}'" onclick="openImgModal('${escapeHtml(imgSrc)}')">
+                    <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.src='${fallbackImg}'" onclick="openImgModal('${escapeHtml(fullImg)}')">
                     <div class="popup-body">
                         <div class="popup-price num">${Math.round(item.price).toLocaleString('pl-PL')} zł</div>
                         <div class="popup-title"><a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.title)}</a></div>
@@ -1566,7 +1573,16 @@
         }
 
         function highlightCard(id) {
-            const card = document.getElementById('card-' + id);
+            let card = document.getElementById('card-' + id);
+            if (!card && currentGridItems && currentGridItems.length > 0) {
+                const targetIdx = currentGridItems.findIndex(i => i.id === id);
+                if (targetIdx >= 0) {
+                    while (renderedGridCount <= targetIdx && renderedGridCount < currentGridItems.length) {
+                        appendNextGridChunk(gridRenderToken);
+                    }
+                    card = document.getElementById('card-' + id);
+                }
+            }
             if (card) {
                 card.scrollIntoView({ behavior: 'smooth', block: 'center' });
                 card.classList.add('card-highlight');
@@ -1620,7 +1636,7 @@
 
         function previewCardThumb(cardId, src, thumbEl, idx, total) {
             const img = document.getElementById('card-img-' + cardId);
-            if (img) img.src = src;
+            if (img) img.src = proxyImg(src);
             const counter = document.getElementById('imgcount-' + cardId);
             if (counter && total) counter.innerText = `${idx + 1}/${total}`;
             if (thumbEl && thumbEl.parentElement) {
@@ -1653,7 +1669,7 @@
             const img = document.getElementById('imgModalSrc');
             const cap = document.getElementById('imgModalCaption');
             if (!img || activeModalGallery.length === 0) return;
-            img.src = activeModalGallery[activeModalIndex];
+            img.src = proxyImg(activeModalGallery[activeModalIndex]);
             if (cap) {
                 cap.innerText = `${activeModalIndex + 1} / ${activeModalGallery.length}`;
             }
@@ -1675,30 +1691,111 @@
         }
 
         // ========================
-        // Grid rendering
+        // Grid rendering (Progressive batch loading / Virtualized DOM)
         // ========================
+        let currentGridItems = [];
+        let renderedGridCount = 0;
+        let gridObserver = null;
+        let gridScrollBound = false;
+        const GRID_CHUNK = 24;
+
         function renderGrid(items) {
             const container = document.getElementById('listingsContainer');
             if (!container) return;
 
             const token = ++gridRenderToken;
             container.innerHTML = '';
+            currentGridItems = items || [];
+            renderedGridCount = 0;
 
-            if (items.length === 0) {
+            if (gridObserver) {
+                gridObserver.disconnect();
+                gridObserver = null;
+            }
+
+            if (currentGridItems.length === 0) {
                 container.innerHTML = '<div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: var(--font-size-base);">Brak ofert spełniających aktywne kryteria wyszukiwania.</div>';
                 return;
             }
 
-            const CHUNK = 48;
-            let i = 0;
-            const step = () => {
-                if (token !== gridRenderToken) return;
-                const slice = items.slice(i, i + CHUNK);
-                container.insertAdjacentHTML('beforeend', slice.map(buildCardHtml).join(''));
-                i += CHUNK;
-                if (i < items.length) requestAnimationFrame(step);
+            appendNextGridChunk(token);
+            bindGridScroll();
+        }
+
+        function appendNextGridChunk(token) {
+            if (token !== undefined && token !== gridRenderToken) return;
+            const container = document.getElementById('listingsContainer');
+            if (!container) return;
+
+            if (renderedGridCount >= currentGridItems.length) {
+                const existingSentinel = document.getElementById('gridSentinel');
+                if (existingSentinel) existingSentinel.remove();
+                if (gridObserver) {
+                    gridObserver.disconnect();
+                    gridObserver = null;
+                }
+                return;
+            }
+
+            const slice = currentGridItems.slice(renderedGridCount, renderedGridCount + GRID_CHUNK);
+            const chunkStartIndex = renderedGridCount;
+            renderedGridCount += slice.length;
+
+            let sentinel = document.getElementById('gridSentinel');
+            if (!sentinel) {
+                sentinel = document.createElement('div');
+                sentinel.id = 'gridSentinel';
+                sentinel.style.cssText = 'height: 40px; width: 100%; grid-column: 1 / -1; display: flex; align-items: center; justify-content: center; color: var(--text-muted); font-size: 12px;';
+                container.appendChild(sentinel);
+            }
+
+            sentinel.insertAdjacentHTML('beforebegin', slice.map((item, i) => buildCardHtml(item, i === 0 && chunkStartIndex === 0)).join(''));
+
+            if (renderedGridCount < currentGridItems.length) {
+                sentinel.innerHTML = `<span style="opacity: 0.6;">Ładowanie kolejnych ofert (${renderedGridCount}/${currentGridItems.length})...</span>`;
+                if (!gridObserver && window.IntersectionObserver) {
+                    gridObserver = new IntersectionObserver((entries) => {
+                        if (entries[0] && entries[0].isIntersecting) {
+                            appendNextGridChunk(gridRenderToken);
+                        }
+                    }, { rootMargin: '300px 0px' });
+                    gridObserver.observe(sentinel);
+                }
+            } else {
+                sentinel.remove();
+                if (gridObserver) {
+                    gridObserver.disconnect();
+                    gridObserver = null;
+                }
+            }
+        }
+
+        function bindGridScroll() {
+            if (gridScrollBound) return;
+            gridScrollBound = true;
+            const container = document.getElementById('listingsContainer');
+
+            const checkScroll = () => {
+                if (renderedGridCount >= currentGridItems.length) return;
+                const sentinel = document.getElementById('gridSentinel');
+                if (!sentinel) return;
+
+                if (container && container.scrollHeight > container.clientHeight) {
+                    if (container.scrollTop + container.clientHeight >= container.scrollHeight - 350) {
+                        appendNextGridChunk(gridRenderToken);
+                    }
+                } else {
+                    const rect = sentinel.getBoundingClientRect();
+                    if (rect.top <= window.innerHeight + 350) {
+                        appendNextGridChunk(gridRenderToken);
+                    }
+                }
             };
-            requestAnimationFrame(step);
+
+            if (container) {
+                container.addEventListener('scroll', checkScroll, { passive: true });
+            }
+            window.addEventListener('scroll', checkScroll, { passive: true });
         }
 
         function renderGridIncremental(items, changedSet) {
@@ -1706,18 +1803,17 @@
             if (!container) return;
 
             if (items.length === 0) {
-                gridRenderToken++;
-                container.innerHTML = '<div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: var(--font-size-base);">Brak ofert spełniających aktywne kryteria wyszukiwania.</div>';
+                renderGrid(items);
                 return;
             }
 
-            if (!container.querySelector('article.card') || changedSet.size > 60) {
+            if (!container.querySelector('article.card') || changedSet.size > 20 || Math.abs(items.length - currentGridItems.length) > 5) {
                 renderGrid(items);
                 return;
             }
 
             gridRenderToken++;
-
+            currentGridItems = items;
             const wantedIds = items.map(i => i.id);
             const wantedSet = new Set(wantedIds);
 
@@ -1726,34 +1822,17 @@
                 if (!wantedSet.has(cardId)) n.remove();
             });
 
-            items.forEach(item => {
-                const existing = document.getElementById('card-' + item.id);
-                if (!existing) {
-                    const html = buildCardHtml(item);
-                    const idx = wantedIds.indexOf(item.id);
-                    let ref = null;
-                    for (let j = idx + 1; j < wantedIds.length; j++) {
-                        ref = document.getElementById('card-' + wantedIds[j]);
-                        if (ref) break;
+            // Update visible cards that changed
+            items.slice(0, renderedGridCount).forEach(item => {
+                if (changedSet.has(item.id)) {
+                    const existing = document.getElementById('card-' + item.id);
+                    if (existing) {
+                        const tmp = document.createElement('div');
+                        tmp.innerHTML = buildCardHtml(item);
+                        if (tmp.firstElementChild) existing.replaceWith(tmp.firstElementChild);
                     }
-                    const tmp = document.createElement('div');
-                    tmp.innerHTML = html;
-                    if (tmp.firstElementChild) container.insertBefore(tmp.firstElementChild, ref);
-                } else if (changedSet.has(item.id)) {
-                    const html = buildCardHtml(item);
-                    const tmp = document.createElement('div');
-                    tmp.innerHTML = html;
-                    if (tmp.firstElementChild) existing.replaceWith(tmp.firstElementChild);
                 }
             });
-
-            let cursor = container.firstElementChild;
-            for (const id of wantedIds) {
-                const node = document.getElementById('card-' + id);
-                if (!node) continue;
-                if (node !== cursor) container.insertBefore(node, cursor);
-                cursor = node.nextElementSibling;
-            }
         }
 
         // ========================
@@ -1779,7 +1858,7 @@
             return icons[name] || '';
         }
 
-        function buildCardHtml(item) {
+        function buildCardHtml(item, isFirstCard = false) {
             const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80";
 
             let badgeClass = "badge-rejected";
@@ -1831,7 +1910,9 @@
             }
 
             const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : '';
-            const imgSrc = item.main_image_url || fallbackImg;
+            const imgSrc = thumbUrl(item.main_image_url) || fallbackImg;
+            const imgLoading = isFirstCard ? 'eager' : 'lazy';
+            const imgFetchPriority = isFirstCard ? ' fetchpriority="high"' : '';
 
             const prosHtml = (item.pros || []).slice(0, 2).map(p => `<li>${escapeHtml(p)}</li>`).join('');
             const consHtml = (item.cons || []).slice(0, 1).map(c => `<li class="warning">${escapeHtml(c)}</li>`).join('');
@@ -1960,7 +2041,7 @@
             let galleryThumbnailsHtml = '';
             if (gallery.length > 1) {
                 const thumbs = gallery.slice(0, 5).map((imgUrl, idx) => `
-                    <img src="${escapeHtml(imgUrl)}" class="card-thumb ${idx === 0 ? 'active' : ''}"
+                    <img src="${escapeHtml(thumbUrl(imgUrl))}" class="card-thumb ${idx === 0 ? 'active' : ''}"
                          alt="Miniatura ${idx + 1}" loading="lazy"
                          onmouseenter="previewCardThumb(${item.id}, '${escapeHtml(imgUrl)}', this, ${idx}, ${gallery.length})"
                          onclick="event.stopPropagation(); openListingGallery(${item.id}, ${idx})"
@@ -2007,8 +2088,8 @@
                 priceArHtml = `<span class="price-m2 num" title="Cena za ar działki (${Math.round(item.area_plot)} m²)">${pricePerAr.toLocaleString('pl-PL')} zł/ar</span>`;
             }
 
-            const tcoSub = (item.land_audit && item.land_audit.tco_audit)
-                ? `<span class="card-action-sub num">CAPEX ~${formatPrice(item.land_audit.tco_audit.total_acquisition_cost)}</span>`
+            const tcoSub = (item.capex_total !== null && item.capex_total !== undefined)
+                ? `<span class="card-action-sub num">CAPEX ~${formatPrice(item.capex_total)}</span>`
                 : '';
 
             const geoportalHref = item.geoportal_url
@@ -2039,7 +2120,7 @@
             return `
             <article class="card ${cardCrmClass}" id="card-${item.id}" onmouseenter="highlightMapMarker(${item.id}, true)" onmouseleave="highlightMapMarker(${item.id}, false)">
                 <div class="card-media" onclick="openListingGallery(${item.id}, 0)">
-                    <img id="card-img-${item.id}" src="${escapeHtml(imgSrc)}" alt="Zdjęcie nieruchomości" loading="lazy" onerror="this.src='${fallbackImg}'">
+                    <img id="card-img-${item.id}" src="${escapeHtml(imgSrc)}" alt="Zdjęcie nieruchomości" loading="${imgLoading}" decoding="async"${imgFetchPriority} onerror="this.src='${fallbackImg}'">
                     ${galleryCountBadge}
                     <div class="card-media-topbar">
                         <div class="card-badges-group">
@@ -2138,6 +2219,24 @@
         function formatPrice(val) {
             if (val === null || val === undefined || isNaN(val)) return '0 zł';
             return Math.round(Number(val)).toLocaleString('pl-PL') + ' zł';
+        }
+
+        // Route an image through the first-party /img proxy (removes third-party cookies).
+        function proxyImg(url) {
+            if (!url) return url;
+            return '/img?url=' + encodeURIComponent(url);
+        }
+
+        // Rewrite portal CDN URLs to a small thumbnail variant for cards.
+        // OLX / Otodom (apollo.olxcdn.com) support on-the-fly resize via ";s=WxH".
+        function thumbUrl(url, size) {
+            if (!url) return url;
+            const s = size || '480x360';
+            let out = url;
+            if (url.indexOf('apollo.olxcdn.com') !== -1 && /;s=\d+x\d+/i.test(url)) {
+                out = url.replace(/;s=\d+x\d+/i, ';s=' + s).replace(/;q=\d+/, ';q=70');
+            }
+            return proxyImg(out);
         }
 
         // ========================
@@ -2615,10 +2714,6 @@
                 showToast('Ustawiono adres silnika: ' + urlInput.value);
             }
         }
-        function setLocalLlmPreset(preset) {
-            setLocalEnginePreset(preset, true);
-        }
-
         function onLocalModelSelectChange(val) {
             const inp = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
             if (!inp) return;
@@ -2629,8 +2724,6 @@
                 inp.select();
             }
         }
-        function onOllamaSelectChange(val) { onLocalModelSelectChange(val); }
-
         function onLocalModelInputCustom(val) {
             const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
@@ -2647,8 +2740,6 @@
                 sel.value = 'custom';
             }
         }
-        function onOllamaInputCustom(val) { onLocalModelInputCustom(val); }
-
         function syncLocalModelSelectWithInput(modelName) {
             const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
             if (!sel) return;
@@ -2665,8 +2756,6 @@
                 sel.value = 'custom';
             }
         }
-        function syncOllamaSelectWithInput(modelName) { syncLocalModelSelectWithInput(modelName); }
-
         function setLocalModelChip(modelName) {
             const input = document.getElementById('cfgLocalModel') || document.getElementById('cfgOllamaModel');
             if (input) {
@@ -2674,8 +2763,6 @@
             }
             syncLocalModelSelectWithInput(modelName);
         }
-        function setOllamaModelChip(modelName) { setLocalModelChip(modelName); }
-
         function setOpenRouterModelChip(modelName) {
             const input = document.getElementById('cfgOpenRouterModel');
             if (input) {
@@ -2698,8 +2785,6 @@
             sel.innerHTML = html;
             syncLocalModelSelectWithInput(cur);
         }
-        function updateOllamaSelectOptions(installedModels, currentVal) { updateLocalModelSelectOptions(installedModels, currentVal); }
-
         function checkLlmStatusIfEmpty() {
             if (!lastLlmStatusData && !isTestingLlm) {
                 testLlmConnection(true);
@@ -3027,11 +3112,9 @@
 
         window.addEventListener('DOMContentLoaded', async () => {
             await fetchConfig();
-            const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
-            const center = curProf ? getCityCenter(curProf.city) : [52.0693, 19.4803];
-            initLeafletMap(center);
             await fetchListings();
             checkActiveScrape();
+            ensureMapInitialized();
         });
 
         setInterval(() => {

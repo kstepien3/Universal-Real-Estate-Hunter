@@ -207,6 +207,130 @@ async def test_live_dashboard_listings_includes_gallery():
 
 
 @pytest.mark.asyncio
+async def test_live_dashboard_listings_lean_payload_and_cache():
+    from src.storage.database import get_session, init_db
+
+    await init_db()
+    async with get_session() as session:
+        repo = ListingRepository(session)
+        listing = ListingSchema(
+            id="lean-cache-test-1",
+            portal="Otodom",
+            title="Dom lean/cache test",
+            url="https://otodom.pl/oferta/lean-cache-test-1",
+            price=800_000,
+            price_per_m2=7_500.0,
+            area_home=107.0,
+            area_plot=400.0,
+            building_type=BuildingType.SZEREGOWIEC,
+            segment_subtype=SegmentSubtype.SKRAJNY,
+            location_raw="Rzeszów",
+            street="Testowa",
+            city="Rzeszów",
+        )
+        filt_res = FilterResult(
+            is_qualified=True,
+            status=QualificationStatus.QUALIFIED_WHITELIST,
+            score=120.0,
+            passed_stage1=True,
+            passed_stage2=True,
+        )
+        model, _, _ = await repo.save_or_update(listing, filt_res)
+        model.ai_summary = "TL;DR oferty."
+        model.ai_verdict = "OK"
+        model.worth_interest = True
+        model.contact_phone = "600100200"
+        model.contact_person = "Agent"
+        model.walkability_pka_dist_m = 250
+        model.air_pm25_summer_avg = 11.5
+        model.gallery_images = ["https://example.com/a.jpg", "https://example.com/b.jpg"]
+        model.gesut_networks_data = {"water": {"distance_m": 12}}
+        await session.commit()
+
+    server = LiveDashboardServer(port=8086)
+    async with TestClient(TestServer(server.app)) as client:
+        resp = await client.get("/api/listings")
+        assert resp.status == 200
+        data = await resp.json()
+        item = next((x for x in data if x.get("portal_id") == "lean-cache-test-1"), None)
+        assert item is not None
+
+        # List omits detail-only fields (Due Diligence re-fetches them via /api/listings/{id})
+        for key in (
+            "worth_interest",
+            "ai_summary",
+            "ai_verdict",
+            "contact_phone",
+            "contact_person",
+            "walkability_pka_dist_m",
+            "air_pm25_summer_avg",
+            "land_audit",
+            "negotiation_arguments",
+        ):
+            assert key not in item
+        # Card-used fields remain
+        assert "gallery_images" in item
+        assert "gesut_networks" in item
+
+        # Detail endpoint still returns everything
+        detail = await (await client.get(f"/api/listings/{item['id']}")).json()
+        assert detail["worth_interest"] is True
+        assert detail["ai_summary"] == "TL;DR oferty."
+        assert detail["contact_phone"] == "600100200"
+        assert detail["walkability_pka_dist_m"] == 250
+
+        # Unchanged data + If-None-Match -> served from cache (304)
+        etag = resp.headers["ETag"]
+        cached = await client.get("/api/listings", headers={"If-None-Match": etag})
+        assert cached.status == 304
+
+        # A status change bumps updated_at -> fingerprint changes -> fresh 200 with new data
+        await client.patch(f"/api/listings/{item['id']}/status", json={"status": "FAVORITE"})
+        refreshed = await client.get("/api/listings", headers={"If-None-Match": etag})
+        assert refreshed.status == 200
+        refreshed_item = next((x for x in await refreshed.json() if x.get("portal_id") == "lean-cache-test-1"), None)
+        assert refreshed_item["user_status"] == "FAVORITE"
+
+
+@pytest.mark.asyncio
+async def test_image_proxy_validation_and_cache(monkeypatch: pytest.MonkeyPatch):
+    from urllib.parse import quote
+
+    from src.storage.database import init_db
+
+    await init_db()
+    server = LiveDashboardServer(port=8085)
+
+    async def fake_fetch(self, url, cache_path, meta_path):
+        cache_path.write_bytes(b"\xff\xd8\xff\xe0fakejpeg")
+        meta_path.write_text("image/jpeg", encoding="utf-8")
+
+    monkeypatch.setattr(LiveDashboardServer, "_fetch_image", fake_fetch)
+
+    good_url = "https://ireland.apollo.olxcdn.com/v1/files/abc/image;s=480x360;q=70"
+    encoded = quote(good_url, safe="")
+
+    async with TestClient(TestServer(server.app)) as client:
+        # Missing url -> 400
+        assert (await client.get("/img")).status == 400
+
+        # Disallowed host -> 403
+        assert (await client.get("/img?url=" + quote("http://evil.example.com/x.jpg", safe=""))).status == 403
+
+        # Allowed host -> proxied + cached, correct content type and immutable cache headers
+        resp = await client.get("/img?url=" + encoded)
+        assert resp.status == 200
+        assert resp.content_type == "image/jpeg"
+        assert (await resp.read()).startswith(b"\xff\xd8\xff\xe0")
+        assert resp.headers["Cache-Control"].startswith("public, max-age=")
+
+        # Repeated request with If-None-Match -> served from disk cache (304)
+        etag = resp.headers["ETag"]
+        cached = await client.get("/img?url=" + encoded, headers={"If-None-Match": etag})
+        assert cached.status == 304
+
+
+@pytest.mark.asyncio
 async def test_delete_by_profile(test_session: AsyncSession):
     repo = ListingRepository(test_session)
 
@@ -361,13 +485,14 @@ async def test_live_dashboard_reset_data_endpoint():
 async def test_live_dashboard_serves_split_assets():
     server = LiveDashboardServer(port=8084)
     async with TestClient(TestServer(server.app)) as client:
-        # Index is markup-only and links to the split assets
+        # Index is markup-only and links to the split assets (versioned + deferred)
         index_resp = await client.get("/")
         assert index_resp.status == 200
         index_html = await index_resp.text()
-        assert '<link rel="stylesheet" href="/assets/dashboard.css">' in index_html
-        assert '<script src="/assets/js/transport.js"></script>' in index_html
-        assert '<script src="/assets/js/dashboard.js"></script>' in index_html
+        assert 'href="/assets/dashboard.css?v=' in index_html
+        assert 'src="/assets/js/transport.js?v=' in index_html
+        assert 'src="/assets/js/dashboard.js?v=' in index_html
+        assert "defer" in index_html
         assert "<style>" not in index_html
 
         # CSS asset with correct content type and ETag
