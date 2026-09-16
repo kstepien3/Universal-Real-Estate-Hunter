@@ -6,6 +6,15 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.13.0 (2026-09-16)
+
+### Features
+
+- **dashboard**: Server-side thumbnails, valuation cache, map clustering, overview tab and update
+  check
+  ([`56bb4ee`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/56bb4eef027e97ecdd4d316482cbd2d3acf5a28f))
+
+
 ## v1.12.1 (2026-09-15)
 
 ### Performance Improvements
