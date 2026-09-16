@@ -931,6 +931,8 @@
             height: auto;
             min-height: fit-content;
         }
+        /* Split view: larger photos (base .card-media is 16/9 max 260px) */
+        .mode-split .card-media { max-height: 500px; }
 
         /* Mode: map */
         .mode-map #appWorkspace { grid-template-columns: 1fr; }
