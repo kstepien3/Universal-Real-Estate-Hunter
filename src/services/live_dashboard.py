@@ -107,6 +107,12 @@ _LIST_OMIT_FIELDS = (
     "initial_price",
     "price_history_count",
     "first_seen_at",
+    "stakeholder_questions",
+    "documents_to_obtain",
+    "structured_risks",
+    "nearest_poi",
+    "poi_counts",
+    "geology_risk_note",
 )
 
 
@@ -1318,6 +1324,15 @@ class LiveDashboardServer:
             "ai_questions": item.ai_questions,
             "contact_phone": item.contact_phone,
             "contact_person": item.contact_person,
+            "stakeholder_questions": item.stakeholder_questions,
+            "documents_to_obtain": item.documents_to_obtain,
+            "structured_risks": item.structured_risks,
+            "solar_hours_per_year": item.solar_hours_per_year,
+            "solar_energy_kwh_m2": item.solar_energy_kwh_m2,
+            "poi_counts": item.poi_counts,
+            "nearest_poi": item.nearest_poi,
+            "geology_formation": item.geology_formation,
+            "geology_risk_note": item.geology_risk_note,
             "listing_status": getattr(item, "listing_status", None) or "ACTIVE",
             "relist_count": getattr(item, "relist_count", 0) or 0,
             "first_seen_at": item.first_seen_at.isoformat() if item.first_seen_at is not None else None,

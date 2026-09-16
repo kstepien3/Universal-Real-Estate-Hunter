@@ -378,6 +378,8 @@ async def test_pipeline_backfill_existing_spatial_data(async_session, monkeypatc
             "walkability_pka_dist_m": 1200.0,
             "walkability_pka_name": "Rzeszów Główny",
             "power_lines_risk": "BRAK",
+            "solar_energy_kwh_m2": 1050.0,
+            "geology_formation": "Grunty mineralne rodzime",
         }
     )
     monkeypatch.setattr(geoportal_service, "audit_location", mock_audit)
@@ -398,6 +400,8 @@ async def test_pipeline_backfill_existing_spatial_data(async_session, monkeypatc
     assert updated_model.terrain_slope_pct == 3.0
     assert updated_model.terrain_aspect == "POŁUDNIOWY"
     assert updated_model.walkability_pka_dist_m == 1200.0
+    assert updated_model.solar_energy_kwh_m2 == 1050.0
+    assert updated_model.geology_formation == "Grunty mineralne rodzime"
 
     # Pros should have FTTH, regular shape, south slope, and PKA
     assert any("Światłowód aktywny" in p for p in updated_model.pros)

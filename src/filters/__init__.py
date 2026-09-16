@@ -435,6 +435,9 @@ class QualificationEngine:
         ai_verdict = None
         worth_interest = None
         ai_questions: list[str] = []
+        stakeholder_questions: dict[str, list[str]] = {}
+        documents_to_obtain: list[str] = []
+        structured_risks: list[dict[str, str]] = []
         contact_phone = None
         contact_person = None
 
@@ -565,6 +568,26 @@ class QualificationEngine:
                 if worth_interest is not None:
                     worth_interest = bool(worth_interest)
                 ai_questions = llm_insights.get("questions_for_agent") or []
+                raw_sq = llm_insights.get("stakeholder_questions")
+                if isinstance(raw_sq, dict):
+                    stakeholder_questions = {
+                        str(k): [str(item) for item in v] if isinstance(v, list) else [] for k, v in raw_sq.items()
+                    }
+                raw_docs = llm_insights.get("documents_to_obtain")
+                if isinstance(raw_docs, list):
+                    documents_to_obtain = [str(d) for d in raw_docs]
+                raw_risks = llm_insights.get("structured_risks")
+                if isinstance(raw_risks, list):
+                    structured_risks = [
+                        {str(rk): str(rv) for rk, rv in r.items()} for r in raw_risks if isinstance(r, dict)
+                    ]
+                if not stakeholder_questions.get("seller") and ai_questions:
+                    stakeholder_questions["seller"] = list(ai_questions)
+
+                listing.stakeholder_questions = stakeholder_questions
+                listing.documents_to_obtain = documents_to_obtain
+                listing.structured_risks = structured_risks
+
                 contact_phone = llm_insights.get("contact_phone") or None
                 contact_person = llm_insights.get("contact_person") or None
 
@@ -634,6 +657,15 @@ class QualificationEngine:
                 air_gios_dist_km=listing.air_gios_dist_km,
                 air_gios_index=listing.air_gios_index,
                 air_smog_risk=listing.air_smog_risk,
+                stakeholder_questions=stakeholder_questions,
+                documents_to_obtain=documents_to_obtain,
+                structured_risks=structured_risks,
+                solar_hours_per_year=listing.solar_hours_per_year,
+                solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
+                poi_counts=listing.poi_counts,
+                nearest_poi=listing.nearest_poi,
+                geology_formation=listing.geology_formation,
+                geology_risk_note=listing.geology_risk_note,
             )
 
         if not passed_stage2:
@@ -691,6 +723,15 @@ class QualificationEngine:
                 air_gios_dist_km=listing.air_gios_dist_km,
                 air_gios_index=listing.air_gios_index,
                 air_smog_risk=listing.air_smog_risk,
+                stakeholder_questions=stakeholder_questions,
+                documents_to_obtain=documents_to_obtain,
+                structured_risks=structured_risks,
+                solar_hours_per_year=listing.solar_hours_per_year,
+                solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
+                poi_counts=listing.poi_counts,
+                nearest_poi=listing.nearest_poi,
+                geology_formation=listing.geology_formation,
+                geology_risk_note=listing.geology_risk_note,
             )
 
         # Step 4: Scoring & Status resolution
@@ -852,6 +893,15 @@ class QualificationEngine:
             air_gios_dist_km=listing.air_gios_dist_km,
             air_gios_index=listing.air_gios_index,
             air_smog_risk=listing.air_smog_risk,
+            stakeholder_questions=stakeholder_questions,
+            documents_to_obtain=documents_to_obtain,
+            structured_risks=structured_risks,
+            solar_hours_per_year=listing.solar_hours_per_year,
+            solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
+            poi_counts=listing.poi_counts,
+            nearest_poi=listing.nearest_poi,
+            geology_formation=listing.geology_formation,
+            geology_risk_note=listing.geology_risk_note,
         )
 
 

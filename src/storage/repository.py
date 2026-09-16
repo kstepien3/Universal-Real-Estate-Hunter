@@ -28,6 +28,12 @@ def _apply_ai_fields(model: ListingModel, result: FilterResult) -> None:
         model.worth_interest = result.worth_interest
     if result.ai_questions:
         model.ai_questions = result.ai_questions
+    if result.stakeholder_questions:
+        model.stakeholder_questions = result.stakeholder_questions
+    if result.documents_to_obtain:
+        model.documents_to_obtain = result.documents_to_obtain
+    if result.structured_risks:
+        model.structured_risks = result.structured_risks
     if result.contact_phone:
         model.contact_phone = result.contact_phone
     if result.contact_person:
@@ -327,6 +333,10 @@ class ListingRepository:
             walkability_pka_dist_m=listing.walkability_pka_dist_m,
             walkability_pka_name=listing.walkability_pka_name,
             power_lines_risk=listing.power_lines_risk,
+            solar_hours_per_year=listing.solar_hours_per_year,
+            solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
+            geology_formation=listing.geology_formation,
+            geology_risk_note=listing.geology_risk_note,
             air_aqi=listing.air_aqi,
             air_aqi_label=listing.air_aqi_label,
             air_pm25_heating_avg=listing.air_pm25_heating_avg,
@@ -353,6 +363,10 @@ class ListingRepository:
             updated_at=listing.created_at,
             last_scraped_at=datetime.now(UTC),
         )
+        if listing.poi_counts:
+            new_model.poi_counts = listing.poi_counts
+        if listing.nearest_poi:
+            new_model.nearest_poi = listing.nearest_poi
         new_model.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
         new_model.pros = filter_result.pros
         new_model.cons = filter_result.cons

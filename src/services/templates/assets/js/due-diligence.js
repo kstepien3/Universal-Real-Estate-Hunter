@@ -141,6 +141,16 @@ function renderLandAuditHtml(item) {
         const fullTxt = [aqiVal, [heatVal, summerVal].filter(Boolean).join(' vs '), giosVal].filter(Boolean).join(' · ');
         legalRows += `<tr class="${cls}"><th>Jakość powietrza (CAMS/GIOŚ)</th><td class="value">${fullTxt}</td></tr>`;
     }
+    if (item.solar_energy_kwh_m2 || item.solar_hours_per_year) {
+        const kwh = item.solar_energy_kwh_m2 ? `${item.solar_energy_kwh_m2} kWh/m²/rok` : '';
+        const hrs = item.solar_hours_per_year ? `~${item.solar_hours_per_year} h słońca/rok` : '';
+        const solarTxt = [kwh, hrs].filter(Boolean).join(' · ');
+        legalRows += `<tr><th>Potencjał solarny (PVGIS)</th><td class="value"><span class="num">${solarTxt}</span> (baza satelitarna SARAH-3)</td></tr>`;
+    }
+    if (item.geology_formation || item.geology_risk_note) {
+        const isGeoWarn = Boolean(item.geology_risk_note && item.geology_risk_note.includes('⚠️'));
+        legalRows += `<tr class="${isGeoWarn ? 'row-warn' : ''}"><th>Warunki geologiczno-gruntowe</th><td class="value"><strong>${escapeHtml(item.geology_formation || 'Grunty mineralne')}</strong>${item.geology_risk_note ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(item.geology_risk_note)}</div>` : ''}</td></tr>`;
+    }
 
     const legalHtml = legalRows ? `
         <div class="audit-block">
@@ -242,7 +252,43 @@ function renderLandAuditHtml(item) {
         `;
     }
 
-    // 4. Legal & planning risk shield
+    // 4. POI & 15-minute city audit (OpenStreetMap Overpass)
+    let poiHtml = '';
+    if (item.poi_counts || item.nearest_poi) {
+        const counts = item.poi_counts || {};
+        const nearest = item.nearest_poi || {};
+        const labels = {
+            'sklepy': 'Sklepy spożywcze',
+            'apteki': 'Apteki',
+            'edukacja': 'Szkoły / przedszkola',
+            'zdrowie': 'Przychodnie / szpitale',
+            'transport': 'Przystanki / stacje',
+            'rekreacja': 'Parki / rekreacja'
+        };
+        const poiRows = Object.entries(labels).map(([cat, label]) => {
+            const count = counts[cat] || 0;
+            const near = nearest[cat];
+            let detail = '';
+            if (near && near.dist_m !== undefined) {
+                detail = `najbliższy: <span class="num">${near.dist_m} m</span> (~${near.walk_min} min pieszo) — ${escapeHtml(near.name || '')}`;
+            } else {
+                detail = count > 0 ? `${count} w promieniu 1.5 km` : 'brak w promieniu 1.5 km';
+            }
+            return `<tr><th>${label}</th><td class="value"><strong class="num">${count}</strong> w 1.5 km &bull; ${detail}</td></tr>`;
+        }).join('');
+
+        poiHtml = `
+            <div class="audit-block">
+                <div class="audit-block-head">
+                    <div class="audit-block-title">Dostępność usług (15-minutowe miasto — OSM)</div>
+                    <span class="audit-verdict-badge audit-verdict-success">Promień 1.5 km</span>
+                </div>
+                <table class="dd-table">${poiRows}</table>
+            </div>
+        `;
+    }
+
+    // 5. Legal & planning risk shield
     let riskHtml = '';
     if (risk) {
         const riskFindings = (risk.findings || []).map(f => `
@@ -327,6 +373,7 @@ function renderLandAuditHtml(item) {
         ${legalHtml}
         ${tcoHtml}
         ${commuteHtml}
+        ${poiHtml}
         ${riskHtml}
         ${gesutHtml}
     `;
@@ -447,13 +494,82 @@ async function openAiModal(listingId) {
         contactSection.style.display = 'none';
     }
 
-    // Questions
+    // 1. Structured Risks Table
+    const riskSection = document.getElementById('aiStructuredRisksSection');
+    const riskContent = document.getElementById('aiStructuredRisksContent');
+    const risks = item.structured_risks || [];
+    if (riskSection && riskContent) {
+        if (risks.length > 0) {
+            riskSection.style.display = 'flex';
+            const riskCards = risks.map(r => {
+                const sev = (r.severity || 'SREDNIE').toUpperCase();
+                let badgeCls = 'audit-verdict-warning';
+                if (sev.includes('KRYT') || sev.includes('WYSOK')) badgeCls = 'audit-verdict-danger';
+                else if (sev.includes('NISK')) badgeCls = 'audit-verdict-success';
+
+                return `
+                    <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;display:flex;flex-direction:column;gap:4px;">
+                        <div style="display:flex;justify-content:space-between;align-items:center;">
+                            <strong style="font-size:var(--font-size-xs);color:var(--text-strong);">${escapeHtml(r.risk || r.category || 'Zidentyfikowane ryzyko')}</strong>
+                            <span class="audit-verdict-badge ${badgeCls}" style="font-size:10px;padding:1px 6px;">${escapeHtml(sev)}</span>
+                        </div>
+                        <div style="font-size:var(--font-size-xs);color:var(--text-secondary);">${escapeHtml(r.impact || r.description || '')}</div>
+                        ${r.action ? `<div style="font-size:var(--font-size-xs);color:var(--blue-text);background:var(--blue-bg);padding:4px 8px;border-radius:var(--r-xs);margin-top:2px;"><strong>Zalecane działanie:</strong> ${escapeHtml(r.action)}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+            riskContent.innerHTML = `<div style="display:flex;flex-direction:column;gap:6px;">${riskCards}</div>`;
+        } else {
+            riskSection.style.display = 'none';
+        }
+    }
+
+    // 2. Documents checklist
+    const docSection = document.getElementById('aiDocumentsSection');
+    const docList = document.getElementById('aiDocumentsList');
+    const docs = item.documents_to_obtain || [];
+    if (docSection && docList) {
+        if (docs.length > 0) {
+            docSection.style.display = 'flex';
+            docList.innerHTML = docs.map((d, idx) => `
+                <li style="display:flex;align-items:flex-start;gap:8px;padding:4px 0;">
+                    <input type="checkbox" id="doc_check_${item.id}_${idx}" style="margin-top:3px;cursor:pointer;" />
+                    <label for="doc_check_${item.id}_${idx}" style="cursor:pointer;font-size:var(--font-size-xs);color:var(--text-primary);">${escapeHtml(d)}</label>
+                </li>
+            `).join('');
+        } else {
+            docSection.style.display = 'none';
+        }
+    }
+
+    // 3. Questions (categorized by stakeholder or fallback to flat list)
     const qList = document.getElementById('aiQuestionsList');
-    const questions = item.ai_questions || [];
-    if (questions.length > 0) {
-        qList.innerHTML = questions.map(q => `<li>${escapeHtml(q)}</li>`).join('');
+    const sq = item.stakeholder_questions || {};
+    const roleLabels = {
+        'seller': 'Sprzedający / Pośrednik',
+        'community': 'Zarządca / Wspólnota',
+        'notary': 'Kancelaria Notarialna',
+        'municipality': 'Wydział Architektury / Urząd Gminy'
+    };
+    const hasStructuredQuestions = Object.values(sq).some(arr => Array.isArray(arr) && arr.length > 0);
+
+    if (hasStructuredQuestions) {
+        let sqHtml = '';
+        for (const [role, list] of Object.entries(sq)) {
+            if (Array.isArray(list) && list.length > 0) {
+                const title = roleLabels[role] || role;
+                sqHtml += `<li style="list-style:none;margin-top:8px;margin-bottom:4px;"><strong style="font-size:var(--font-size-xs);color:var(--blue-text);text-transform:uppercase;letter-spacing:0.5px;">📌 ${escapeHtml(title)}:</strong></li>`;
+                sqHtml += list.map(q => `<li>${escapeHtml(q)}</li>`).join('');
+            }
+        }
+        qList.innerHTML = sqHtml;
     } else {
-        qList.innerHTML = '<li class="no-data">Brak pytań — uruchom synchronizację z analizą LLM.</li>';
+        const questions = item.ai_questions || [];
+        if (questions.length > 0) {
+            qList.innerHTML = questions.map(q => `<li>${escapeHtml(q)}</li>`).join('');
+        } else {
+            qList.innerHTML = '<li class="no-data">Brak pytań — uruchom synchronizację z analizą LLM.</li>';
+        }
     }
 
     // CAPEX renders once, inside the Due Diligence audit block (renderLandAuditHtml).
@@ -725,10 +841,36 @@ function renderAirQualityDrawer(item) {
 
 function copyAiQuestions() {
     if (!currentAiItem) return;
-    const qs = currentAiItem.ai_questions || [];
-    if (qs.length === 0) { showToast('Brak pytań do skopiowania.'); return; }
-    const text = qs.map((q, i) => `${i + 1}. ${q}`).join('\n');
-    navigator.clipboard.writeText(text).then(() => showToast('Pytania skopiowane do schowka.'));
+    const sq = currentAiItem.stakeholder_questions;
+    const roleTitles = {
+        'seller': 'Pytania do sprzedającego / pośrednika',
+        'community': 'Pytania do zarządcy / wspólnoty',
+        'notary': 'Pytania do kancelarii notarialnej',
+        'municipality': 'Pytania do wydziału architektury / urzędu gminy'
+    };
+    let text = '';
+    if (sq && typeof sq === 'object' && Object.keys(sq).length > 0) {
+        for (const [role, list] of Object.entries(sq)) {
+            if (Array.isArray(list) && list.length > 0) {
+                text += `\n[${roleTitles[role] || role}]\n`;
+                text += list.map((q, i) => `${i + 1}. ${q}`).join('\n') + '\n';
+            }
+        }
+    }
+    if (!text.trim()) {
+        const qs = currentAiItem.ai_questions || [];
+        if (qs.length === 0) { showToast('Brak pytań do skopiowania.'); return; }
+        text = qs.map((q, i) => `${i + 1}. ${q}`).join('\n');
+    }
+    navigator.clipboard.writeText(text.trim()).then(() => showToast('Pytania skopiowane do schowka.'));
+}
+
+function copyAiDocuments() {
+    if (!currentAiItem) return;
+    const docs = currentAiItem.documents_to_obtain || [];
+    if (docs.length === 0) { showToast('Brak dokumentów do skopiowania.'); return; }
+    const text = 'Dokumenty do weryfikacji przed transakcją:\n' + docs.map((d, i) => `${i + 1}. [ ] ${d}`).join('\n');
+    navigator.clipboard.writeText(text).then(() => showToast('Checklista dokumentów skopiowana do schowka.'));
 }
 
 function copyAiSms() {
