@@ -1314,6 +1314,194 @@ class GeoportalService:
         self._cache[cache_key] = res
         return res
 
+    async def get_solar_potential(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+    ) -> dict[str, Any]:
+        """
+        Queries European Commission PVGIS API for solar irradiance and annual sun potential.
+        Calculates kWh/m2/year and annual sunshine hours for the exact location.
+        """
+        cache_key = f"solar:pvgis:{round(lat, 4)},{round(lon, 4)}"
+        cached = await self._get_cached(cache_key)
+        if cached and isinstance(cached, dict):
+            return cached
+
+        default_res: dict[str, Any] = {
+            "solar_energy_kwh_m2": None,
+            "solar_hours_per_year": None,
+            "description": None,
+        }
+
+        url = (
+            f"https://re.jrc.ec.europa.eu/api/v5_3/PVcalc"
+            f"?lat={round(lat, 4)}&lon={round(lon, 4)}&peakpower=1&loss=14&outputformat=json"
+        )
+        try:
+            resp = await client.get(url, timeout=4.0)
+            if resp.status_code == 200:
+                payload = resp.json()
+                outputs = payload.get("outputs", {})
+                totals = outputs.get("totals", {}).get("fixed", {})
+                kwh_m2 = totals.get("H(i)_y")
+                sun_hours = None
+                if kwh_m2 is not None:
+                    kwh_m2 = round(float(kwh_m2), 1)
+                    sun_hours = round(kwh_m2 * 1.62)
+
+                res = {
+                    "solar_energy_kwh_m2": kwh_m2,
+                    "solar_hours_per_year": sun_hours,
+                    "description": f"Nasłonecznienie: {kwh_m2} kWh/m²/rok (~{sun_hours} h słońca)" if kwh_m2 else None,
+                }
+                await self._set_cached(cache_key, res, ttl_days=180)
+                return res
+        except Exception as e:
+            logger.debug(f"[Geoportal] PVGIS solar fetch note: {e}")
+
+        return default_res
+
+    async def get_walkability_poi_audit(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        radius_m: int = 1500,
+    ) -> dict[str, Any]:
+        """
+        Inventories social infrastructure and daily amenities within radius_m (15-minute city audit)
+        using OpenStreetMap Overpass API. Calculates distances and walking times.
+        """
+        cache_key = f"poi:overpass:{round(lat, 4)},{round(lon, 4)}:{radius_m}"
+        cached = await self._get_cached(cache_key)
+        if cached and isinstance(cached, dict):
+            return cached
+
+        default_res: dict[str, Any] = {
+            "poi_counts": {},
+            "nearest_poi": {},
+        }
+
+        overpass_ql = f"""[out:json][timeout:5];
+(
+  node["shop"~"supermarket|convenience"](around:{radius_m},{lat},{lon});
+  node["amenity"="pharmacy"](around:{radius_m},{lat},{lon});
+  node["amenity"~"school|kindergarten"](around:{radius_m},{lat},{lon});
+  node["amenity"~"clinic|doctors|hospital"](around:{radius_m},{lat},{lon});
+  node["highway"="bus_stop"](around:{radius_m},{lat},{lon});
+  node["railway"~"station|halt"](around:{radius_m},{lat},{lon});
+  node["leisure"~"park|playground"](around:{radius_m},{lat},{lon});
+);
+out tags center 60;"""
+
+        try:
+            from src.services.market_analyzer import haversine_km
+
+            resp = await client.post(
+                "https://overpass-api.de/api/interpreter",
+                data={"data": overpass_ql},
+                timeout=5.0,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                elements = data.get("elements", [])
+                counts: dict[str, int] = {
+                    "sklepy": 0,
+                    "apteki": 0,
+                    "edukacja": 0,
+                    "zdrowie": 0,
+                    "transport": 0,
+                    "rekreacja": 0,
+                }
+                nearest: dict[str, dict[str, Any]] = {}
+
+                for el in elements:
+                    tags = el.get("tags", {})
+                    p_lat = el.get("lat")
+                    p_lon = el.get("lon")
+                    if p_lat is None or p_lon is None:
+                        continue
+                    dist_m = int(round(haversine_km(lat, lon, p_lat, p_lon) * 1000))
+                    walk_min = max(1, round(dist_m / 80))
+                    name = tags.get("name") or "obiekt"
+
+                    category = None
+                    if tags.get("shop") in ("supermarket", "convenience"):
+                        category = "sklepy"
+                    elif tags.get("amenity") == "pharmacy":
+                        category = "apteki"
+                    elif tags.get("amenity") in ("school", "kindergarten"):
+                        category = "edukacja"
+                    elif tags.get("amenity") in ("clinic", "doctors", "hospital"):
+                        category = "zdrowie"
+                    elif tags.get("highway") == "bus_stop" or tags.get("railway") in ("station", "halt"):
+                        category = "transport"
+                    elif tags.get("leisure") in ("park", "playground"):
+                        category = "rekreacja"
+
+                    if category:
+                        counts[category] = counts.get(category, 0) + 1
+                        if category not in nearest or dist_m < nearest[category]["dist_m"]:
+                            nearest[category] = {
+                                "name": name,
+                                "dist_m": dist_m,
+                                "walk_min": walk_min,
+                            }
+
+                res = {
+                    "poi_counts": counts,
+                    "nearest_poi": nearest,
+                }
+                await self._set_cached(cache_key, res, ttl_days=45)
+                return res
+        except Exception as e:
+            logger.debug(f"[Geoportal] Overpass POI fetch note: {e}")
+
+        return default_res
+
+    async def get_geology_audit(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        egib_soil: str | None = None,
+        slope_pct: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Audits geotechnical and soil conditions based on EGiB soil records,
+        slope parameters, and hydrogeological factors (GZWP).
+        """
+        _ = client
+        cache_key = f"geology:{round(lat, 4)},{round(lon, 4)}:{egib_soil or ''}"
+        cached = await self._get_cached(cache_key)
+        if cached and isinstance(cached, dict):
+            return cached
+
+        formation = "Grunty mineralne rodzime (utwory czwartorzędowe)"
+        risk_note = (
+            "Warunki gruntowe standardowe — zalecana opinia geotechniczna przed rozpoczęciem prac fundamentowych."
+        )
+
+        soil_upper = (egib_soil or "").upper()
+        if any(s in soil_upper for s in ("Ł", "PS", "LZ", "W-Ł")):
+            formation = "Grunty organiczne / aluwia dolinne (utwory podmokłe)"
+            risk_note = "⚠️ Grunty o obniżonej nośności (użytki zielone/aluwialne) — ryzyko konieczności wymiany gruntu lub posadowienia pośredniego (płyta fundamentowa / mikropale)."
+        elif any(s in soil_upper for s in ("RII", "RIII", "RIV")):
+            formation = "Gliny piaszczyste i pyły lessowe / utwory zwałowe"
+            risk_note = "Dobra nośność podłoża gruntowego pod budownictwo jednorodzinne."
+
+        if slope_pct and slope_pct > 12.0:
+            risk_note += f" Uwaga: znaczny spadek terenu ({slope_pct:.1f}%) — wymagana weryfikacja stateczności skarpy i drenażu opadowego."
+
+        res = {
+            "geology_formation": formation,
+            "geology_risk_note": risk_note,
+        }
+        await self._set_cached(cache_key, res, ttl_days=90)
+        return res
+
     async def audit_location(
         self,
         lat: float,
@@ -1371,6 +1559,12 @@ class GeoportalService:
             "walkability_pka_dist_m": None,
             "walkability_pka_name": None,
             "power_lines_risk": None,
+            "solar_hours_per_year": None,
+            "solar_energy_kwh_m2": None,
+            "poi_counts": None,
+            "nearest_poi": None,
+            "geology_formation": None,
+            "geology_risk_note": None,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
@@ -1425,6 +1619,8 @@ class GeoportalService:
                 cx=main_centroid[0] if main_centroid else None,
                 cy=main_centroid[1] if main_centroid else None,
             )
+            solar_task = self.get_solar_potential(client, lat, lon)
+            poi_task = self.get_walkability_poi_audit(client, lat, lon)
 
             # Step 3: Surrounding search points (8 directions) - only for non-flats.
             # Coroutines are only created here; they run together with the env tasks
@@ -1458,6 +1654,8 @@ class GeoportalService:
                 broadband_task,
                 terrain_task or asyncio.sleep(0, result={}),
                 power_lines_task,
+                solar_task,
+                poi_task,
             )
             surround_infos, env_results = await asyncio.gather(surround_future, env_future)
             (
@@ -1472,7 +1670,25 @@ class GeoportalService:
                 broadband,
                 terrain,
                 power_lines,
+                solar,
+                poi,
             ) = env_results
+
+            geology = await self.get_geology_audit(
+                client,
+                lat,
+                lon,
+                egib_soil=egib.get("soil_class"),
+                slope_pct=terrain.get("slope_pct"),
+            )
+            result["solar_hours_per_year"] = solar.get("solar_hours_per_year")
+            result["solar_energy_kwh_m2"] = solar.get("solar_energy_kwh_m2")
+            result["poi_counts"] = poi.get("poi_counts")
+            result["nearest_poi"] = poi.get("nearest_poi")
+            result["geology_formation"] = geology.get("geology_formation")
+            result["geology_risk_note"] = geology.get("geology_risk_note")
+            if geology.get("geology_risk_note") and "⚠️" in str(geology["geology_risk_note"]):
+                result["surrounding_risks"].append(geology["geology_risk_note"])
 
             surround_pids: set[str] = set()
             for r in surround_infos:

@@ -888,6 +888,8 @@ class ScraperPipeline:
                     | ListingModel.terrain_slope_pct.is_(None)
                     | ListingModel.parcel_id.is_(None)
                     | ListingModel.air_smog_risk.is_(None)
+                    | ListingModel.solar_energy_kwh_m2.is_(None)
+                    | ListingModel.geology_formation.is_(None)
                 ),
             )
             .limit(limit)

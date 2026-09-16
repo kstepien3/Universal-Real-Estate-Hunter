@@ -643,6 +643,32 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
                 city_display = c_slug.capitalize()
                 break
 
+    # If still not resolved, check target city from user search profile (e.g. suburban listing in search radius)
+    if city_center_coords is None:
+        try:
+            from src.services.config_manager import config_manager
+
+            cfg = config_manager.get_config()
+            profile_name = _prop(listing, "profile_name", None)
+            target_city = None
+            if profile_name and cfg.profiles:
+                for p in cfg.profiles:
+                    if p.name == profile_name and p.city:
+                        target_city = p.city
+                        break
+            if not target_city and cfg.city:
+                target_city = cfg.city
+            if target_city:
+                t_slug = slugify_city(target_city)
+                if t_slug in CITY_CENTROIDS:
+                    c_cand = CITY_CENTROIDS[t_slug]
+                    # Only anchor if within realistic metropolitan commuting range (50 km)
+                    if haversine_km(flat, flon, c_cand[0], c_cand[1]) <= 50.0:
+                        city_center_coords = c_cand
+                        city_display = target_city
+        except Exception:
+            pass
+
     dist_center: float | None = None
     commute_min: int | None = None
     if city_center_coords is not None:
@@ -660,6 +686,14 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
     if pka_distances[0][1] <= 15.0:
         nearest_pka_name, nearest_pka_dist = pka_distances[0]
 
+    # Check walkability_pka from spatial audit if closer or if PKA_STATIONS had no match
+    pka_m = _prop(listing, "walkability_pka_dist_m", None)
+    if pka_m is not None:
+        dist_km = round(float(pka_m) / 1000.0, 1)
+        if nearest_pka_dist is None or dist_km < nearest_pka_dist:
+            nearest_pka_name = str(_prop(listing, "walkability_pka_name", "") or "Stacja kolejowa")
+            nearest_pka_dist = dist_km
+
     # Check expressway proximity
     hub_distances = [(name, haversine_km(flat, flon, hlat, hlon)) for name, hlat, hlon in EXPRESSWAY_HUBS]
     hub_distances.sort(key=lambda x: x[1])
@@ -667,6 +701,27 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
         nearest_hub_name, nearest_hub_dist = hub_distances[0]
 
     findings: list[dict[str, str]] = []
+
+    # Precision indicator finding
+    is_exact = _prop(listing, "is_exact_coords", None)
+    if is_exact:
+        findings.append(
+            {
+                "badge": "📍 Precyzyjna Lokalizacja",
+                "title": f"Punkt adresowy / działka ({flat:.4f}, {flon:.4f})",
+                "desc": "Współrzędne potwierdzone w ewidencji gruntów (EGiB / Geoportal). Odległości i czasy dojazdu wyliczone precyzyjnie.",
+                "severity": "success",
+            }
+        )
+    elif lat is not None and lon is not None:
+        findings.append(
+            {
+                "badge": "📍 Przybliżony Rejon",
+                "title": "Lokalizacja orientacyjna (dzielnica/rejon)",
+                "desc": "Ogłoszenie zawiera przybliżony rejon bez numeru domu/działki. Odległości orientacyjne.",
+                "severity": "info",
+            }
+        )
 
     # Center
     if dist_center is None:

@@ -14,7 +14,7 @@ from config import settings
 from src.models.listing import ListingSchema
 
 LLM_MAX_RETRIES = 3
-PROMPT_VERSION = "v1.0"
+PROMPT_VERSION = "v1.1"
 _PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent / "prompts" / "v1_forensic.txt"
 _PROMPT_TEMPLATE_CACHE: str | None = None
 

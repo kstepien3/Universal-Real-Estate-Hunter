@@ -1168,7 +1168,42 @@
                     </div>
                 </section>
 
-                <!-- Pytania do agenta -->
+                <!-- Zidentyfikowane ryzyka i plan działań -->
+                <section class="drawer-section" id="aiStructuredRisksSection" style="display:none;">
+                    <h3 class="drawer-section-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+                            <line x1="12" y1="9" x2="12" y2="13"></line>
+                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                        </svg>
+                        Zidentyfikowane ryzyka i plan działań
+                    </h3>
+                    <div id="aiStructuredRisksContent"></div>
+                </section>
+
+                <!-- Checklista dokumentów przed zakupem -->
+                <section class="drawer-section" id="aiDocumentsSection" style="display:none;">
+                    <h3 class="drawer-section-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14 2 14 8 20 8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10 9 9 9 8 9"></polyline>
+                        </svg>
+                        Dokumenty do weryfikacji przed zakupem
+                        <button class="copy-inline-btn" onclick="copyAiDocuments()" title="Kopiuj listę dokumentów">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            Kopiuj
+                        </button>
+                    </h3>
+                    <ul id="aiDocumentsList" class="questions-list"></ul>
+                </section>
+
+                <!-- Pytania do agenta / interesariuszy -->
                 <section class="drawer-section">
                     <h3 class="drawer-section-title">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1176,7 +1211,7 @@
                             <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path>
                             <path d="M12 17h.01"></path>
                         </svg>
-                        Pytania do agenta / sprzedającego
+                        Pytania audytowe (sprzedający / wspólnota / notariusz / gmina)
                         <button class="copy-inline-btn" onclick="copyAiQuestions()" title="Kopiuj pytania">
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                                 <rect x="9" y="9" width="13" height="13" rx="2"></rect>

@@ -38,7 +38,17 @@ Finish note:
 8. Visualisations: "has_visualisations" is true when the text indicates the photos are NOT real photos of the actual property: wizualizacje, zdjęcia poglądowe, przykładowa aranżacja, zdjęcia z innej/zakończonej realizacji, dom pokazowy, render, projekt koncepcyjny, "zdjęcia mają charakter poglądowy". Also true when it is a primary-market development not yet built and photos are explicitly called renders. Return null if nothing indicates this. If true, return "visualisation_note": one short Polish sentence quoting the evidence.
 9. Summary (TL;DR): max 2 sentences, factual, no marketing fluff. MUST contain: location, area, price (and zł/m²), the actual finish state, and the single most important risk or advantage. Forbidden: "okazja", "wyjątkowy", "piękny", vague praise, repeating the title.
 10. Verdict: "worth_interest" = true/false/null. true = after considering price per m², finish state, hidden costs and legal risks, this offer is worth contacting/visiting. false = clearly overpriced or has disqualifying problems. null = not enough data to judge. "verdict" = exactly one Polish sentence justifying the decision with concrete numbers from the listing (e.g. "Tak — 6 900 zł/m² przy stanie gotowym do zamieszkania to poniżej rynku w tej lokalizacji."). Never use vague statements like "warto rozważyć" without numbers.
-11. Questions: 3-5 sharp, substantive questions the buyer should ask BEFORE the visit. They must target information gaps in THIS specific listing.
+11. Questions & Documents:
+    - "questions_for_agent": 3-5 sharp questions to ask the agent/seller before the visit.
+    - "stakeholder_questions": categorize questions by stakeholder:
+      * "seller": [string] — questions for seller/agent (legal claims, appliances, utility bills, boundaries, reasons for discount).
+      * "community": [string] — questions for housing community/spółdzielnia (operating fees, repair fund balance, planned renovations/charges). Empty list if single family house.
+      * "notary": [string] — questions for the notary (KW encumbrances in działy III/IV, tax exemptions, required certificates).
+      * "municipality": [string] — questions for the local gmina/urząd (MPZP status, public access road status, planned nearby investments/roadworks).
+    - "documents_to_obtain": 3-6 specific documents the buyer should demand before the preliminary contract (e.g. odpis z KW z ekw.ms.gov.pl, wypis/wyrys z MPZP lub WZ, świadectwo charakterystyki energetycznej, zaświadczenie o braku zaległości czynszowych/podatkowych, protokół odbioru technicznego).
+    - "structured_risks": list of key risks categorized by severity:
+      * Each element: {"severity": "KRYTYCZNE" | "WYSOKIE" | "SREDNIE" | "NISKIE", "title": string, "description": string, "action": string}
+      * "action" MUST be a concrete remediation step ("Co zrobić" — np. weryfikacja w urzędzie, żądanie dokumentu, zlecenie ekspertyzy).
 12. Contact: Extract the phone number (format +48XXXXXXXXX or 9 digits) and the contact person's name if present in the text; null otherwise.
 13. Plot area: If the text states the plot/garden area (e.g. "3.2 ara" -> 320.0), return it in m²; otherwise null.
 14. Pros/cons: up to 4 each, key technical advantages / disadvantages included in the price or affecting the value.
@@ -48,7 +58,7 @@ Finish note:
     - If Parcel ID is unknown (approximate location), include a question asking for the exact cadastral parcel number (nr działki) and obręb to verify MPZP and flood maps.
     - If air quality data indicates elevated winter smog (PM2.5 heating avg > 25 µg/m³ or smog days >= 20), add a con regarding winter smog risk and formulate an agent question concerning heating methods in the building and immediate neighborhood (e.g. solid fuel boilers in the vicinity).
 
-Language: All free-text string values (summary, finish_note, visualisation_note, verdict, questions_for_agent, contact_person, hidden_costs, legal_risks, discrepancies, pros, cons) MUST be in Polish. Enum values stay exactly as specified.
+Language: All free-text string values (summary, finish_note, visualisation_note, verdict, questions_for_agent, stakeholder_questions, documents_to_obtain, structured_risks, contact_person, hidden_costs, legal_risks, discrepancies, pros, cons) MUST be in Polish. Enum values stay exactly as specified.
 
 Property data:
 Title: {title}
@@ -80,6 +90,21 @@ Return valid JSON with exactly this schema:
   "worth_interest": boolean | null,
   "verdict": string | null,
   "questions_for_agent": [string],
+  "stakeholder_questions": {{
+    "seller": [string],
+    "community": [string],
+    "notary": [string],
+    "municipality": [string]
+  }},
+  "documents_to_obtain": [string],
+  "structured_risks": [
+    {{
+      "severity": "KRYTYCZNE" | "WYSOKIE" | "SREDNIE" | "NISKIE",
+      "title": string,
+      "description": string,
+      "action": string
+    }}
+  ],
   "contact_phone": string | null,
   "contact_person": string | null,
   "finish_condition": "deweloperski" | "pod_klucz" | "surowy_zamkniety" | "surowy_otwarty" | "do_remontu" | "do_wykonczenia" | null,

@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import (
     Boolean,
@@ -96,6 +97,12 @@ class ListingModel(Base):
     walkability_pka_dist_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
     walkability_pka_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
     power_lines_risk: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    solar_hours_per_year: Mapped[float | None] = mapped_column(Float, nullable=True)
+    solar_energy_kwh_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    _poi_counts: Mapped[str | None] = mapped_column("poi_counts", Text, nullable=True)
+    _nearest_poi: Mapped[str | None] = mapped_column("nearest_poi", Text, nullable=True)
+    geology_formation: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    geology_risk_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Air quality & smog intelligence (CAMS + GIOŚ)
     air_aqi: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -128,6 +135,9 @@ class ListingModel(Base):
     ai_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
     worth_interest: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     _ai_questions: Mapped[str] = mapped_column("ai_questions", Text, default="[]")
+    _stakeholder_questions: Mapped[str] = mapped_column("stakeholder_questions", Text, default="{}")
+    _documents_to_obtain: Mapped[str] = mapped_column("documents_to_obtain", Text, default="[]")
+    _structured_risks: Mapped[str] = mapped_column("structured_risks", Text, default="[]")
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     contact_person: Mapped[str | None] = mapped_column(String(150), nullable=True)
     # LLM cache: stable hash of normalized description + raw JSON + prompt/model version
@@ -225,6 +235,61 @@ class ListingModel(Base):
     @ai_questions.setter
     def ai_questions(self, value: list[str]):
         self._ai_questions = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def stakeholder_questions(self) -> dict[str, list[str]]:
+        try:
+            return json.loads(self._stakeholder_questions) if self._stakeholder_questions else {}
+        except Exception:
+            return {}
+
+    @stakeholder_questions.setter
+    def stakeholder_questions(self, value: dict[str, list[str]] | None):
+        self._stakeholder_questions = json.dumps(value or {}, ensure_ascii=False)
+
+    @property
+    def documents_to_obtain(self) -> list[str]:
+        try:
+            return json.loads(self._documents_to_obtain) if self._documents_to_obtain else []
+        except Exception:
+            return []
+
+    @documents_to_obtain.setter
+    def documents_to_obtain(self, value: list[str] | None):
+        self._documents_to_obtain = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def structured_risks(self) -> list[dict[str, str]]:
+        try:
+            return json.loads(self._structured_risks) if self._structured_risks else []
+        except Exception:
+            return []
+
+    @structured_risks.setter
+    def structured_risks(self, value: list[dict[str, str]] | None):
+        self._structured_risks = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def poi_counts(self) -> dict[str, int] | None:
+        try:
+            return json.loads(self._poi_counts) if self._poi_counts else None
+        except Exception:
+            return None
+
+    @poi_counts.setter
+    def poi_counts(self, value: dict[str, int] | None):
+        self._poi_counts = json.dumps(value, ensure_ascii=False) if value else None
+
+    @property
+    def nearest_poi(self) -> dict[str, Any] | None:
+        try:
+            return json.loads(self._nearest_poi) if self._nearest_poi else None
+        except Exception:
+            return None
+
+    @nearest_poi.setter
+    def nearest_poi(self, value: dict[str, Any] | None):
+        self._nearest_poi = json.dumps(value, ensure_ascii=False) if value else None
 
     @property
     def gesut_networks_data(self) -> dict | None:

@@ -91,7 +91,7 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
     OPENROUTER_MODEL: str = "nex-agi/nex-n2.5-mini:free"
     LLM_MAX_CALLS_PER_MINUTE: int = 15
-    LLM_PROMPT_VERSION: str = "v1.0"
+    LLM_PROMPT_VERSION: str = "v1.1"
     MEDIANS_CACHE_TTL_MINUTES: int = 30
     GEOCODE_BATCH_SIZE: int = 8
     OPENAI_API_KEY: str | None = None

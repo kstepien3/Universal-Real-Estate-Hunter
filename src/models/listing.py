@@ -36,6 +36,12 @@ GEO_FIELDS: tuple[str, ...] = (
     "walkability_pka_dist_m",
     "walkability_pka_name",
     "power_lines_risk",
+    "solar_hours_per_year",
+    "solar_energy_kwh_m2",
+    "poi_counts",
+    "nearest_poi",
+    "geology_formation",
+    "geology_risk_note",
 )
 
 AIR_FIELDS: tuple[str, ...] = (
@@ -156,6 +162,10 @@ class FilterResult(BaseModel):
     ai_questions: list[str] = Field(default_factory=list)
     contact_phone: str | None = None
     contact_person: str | None = None
+    # Stakeholder questions & document checklist
+    stakeholder_questions: dict[str, list[str]] = Field(default_factory=dict)
+    documents_to_obtain: list[str] = Field(default_factory=list)
+    structured_risks: list[dict[str, str]] = Field(default_factory=list)
     # Spatial due diligence
     mpzp_zone: str | None = None
     flood_risk_zone: str | None = None
@@ -178,6 +188,12 @@ class FilterResult(BaseModel):
     walkability_pka_dist_m: int | None = None
     walkability_pka_name: str | None = None
     power_lines_risk: str | None = None
+    solar_hours_per_year: float | None = None
+    solar_energy_kwh_m2: float | None = None
+    poi_counts: dict[str, int] | None = None
+    nearest_poi: dict[str, Any] | None = None
+    geology_formation: str | None = None
+    geology_risk_note: str | None = None
     # Air quality & smog intelligence (CAMS + GIOŚ)
     air_aqi: int | None = None
     air_aqi_label: str | None = None
@@ -266,6 +282,16 @@ class ListingSchema(BaseModel):
     walkability_pka_dist_m: int | None = None
     walkability_pka_name: str | None = None
     power_lines_risk: str | None = None
+    solar_hours_per_year: float | None = None
+    solar_energy_kwh_m2: float | None = None
+    poi_counts: dict[str, int] | None = None
+    nearest_poi: dict[str, Any] | None = None
+    geology_formation: str | None = None
+    geology_risk_note: str | None = None
+    # Stakeholder questions & document checklist
+    stakeholder_questions: dict[str, list[str]] = Field(default_factory=dict)
+    documents_to_obtain: list[str] = Field(default_factory=list)
+    structured_risks: list[dict[str, str]] = Field(default_factory=list)
     # Air quality & smog intelligence (CAMS + GIOŚ)
     air_aqi: int | None = None
     air_aqi_label: str | None = None
