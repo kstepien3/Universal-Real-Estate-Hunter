@@ -6,6 +6,19 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.14.0 (2026-09-16)
+
+### Bug Fixes
+
+- **commute**: Resolve profile city and transit POI in commute audit
+  ([`3f1d4ef`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/3f1d4ef71d4be956efcf3972d35cbb0eb4f221e3))
+
+### Features
+
+- **due-diligence**: Add solar potential, POI walkability, geology audit and structured risks
+  ([`79a1ae6`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/79a1ae6244c6cd50811f9ba6b5889692ab93e4c2))
+
+
 ## v1.13.1 (2026-09-16)
 
 ### Bug Fixes
