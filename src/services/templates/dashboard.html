@@ -8,6 +8,7 @@
 
     <!-- Leaflet Map CSS (Self-hosted) -->
     <link rel="stylesheet" href="/assets/vendor/leaflet/leaflet.css">
+    <link rel="stylesheet" href="/assets/vendor/leaflet-markercluster/MarkerCluster.css">
 
     <link rel="stylesheet" href="/assets/dashboard.css">
 </head>
@@ -74,7 +75,8 @@
                     <path d="M3 21v-5h5"></path>
                 </svg>
             </button>
-            <button type="button" class="btn topbar-icon-btn" onclick="openConfigModal()" title="Ustawienia" aria-label="Ustawienia">
+            <button type="button" class="btn topbar-icon-btn" id="btnSettings" onclick="openConfigModal()" title="Ustawienia" aria-label="Ustawienia">
+                <span class="update-dot" id="updateDot" hidden title="Dostępna nowa wersja — sprawdź Podsumowanie"></span>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
                     <circle cx="12" cy="12" r="3"></circle>
@@ -361,6 +363,16 @@
                         </svg>
                         <span>Warstwa AQI</span>
                     </button>
+                    <button type="button" class="map-ctrl-btn" id="btnFitMap" onclick="fitMapToMarkers()" title="Dopasuj mapę do aktualnych wyników">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <circle cx="12" cy="12" r="3"></circle>
+                            <path d="M12 2v3"></path>
+                            <path d="M12 19v3"></path>
+                            <path d="M2 12h3"></path>
+                            <path d="M19 12h3"></path>
+                        </svg>
+                        <span>Dopasuj</span>
+                    </button>
                 </div>
             </div>
             <div class="listings-column">
@@ -423,7 +435,8 @@
             </div>
 
             <div class="config-tabs">
-                <button type="button" class="config-tab-btn active" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">Profile wyszukiwania</button>
+                <button type="button" class="config-tab-btn active" id="tabBtnOverview" onclick="switchConfigTab('overview')">Podsumowanie</button>
+                <button type="button" class="config-tab-btn" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">Profile wyszukiwania</button>
                 <button type="button" class="config-tab-btn" id="tabBtnCapex" onclick="switchConfigTab('capex')">Koszty (CAPEX)</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">Scrapery i portale</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">Harmonogram</button>
@@ -433,7 +446,12 @@
             <div class="config-body">
 
                 <!-- TAB 1: PROFILES -->
-                <div id="configTabProfiles">
+                <div id="configTabOverview">
+                    <div id="configOverviewBody">
+                        <div style="text-align: center; padding: 32px; color: var(--text-muted);">Ładowanie podsumowania…</div>
+                    </div>
+                </div>
+                <div id="configTabProfiles" style="display:none;">
                     <div class="config-profile-bar">
                         <div class="config-profile-select-wrap">
                             <label for="cfgProfileSelect" class="config-profile-label">Profil:</label>
@@ -1225,6 +1243,7 @@
 
     <!-- Leaflet Map JS (Self-hosted) -->
     <script src="/assets/vendor/leaflet/leaflet.js" defer></script>
+    <script src="/assets/vendor/leaflet-markercluster/leaflet.markercluster.js" defer></script>
     <script src="/assets/js/transport.js" defer></script>
     <script src="/assets/js/dashboard.js" defer></script>
     <script src="/assets/js/due-diligence.js" defer></script>

@@ -136,6 +136,20 @@ class ListingModel(Base):
     llm_prompt_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
     llm_model: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
+    # Dashboard valuation cache: card-used scalars from valuation_engine.evaluate,
+    # persisted so /api/listings serves them without recomputing per request.
+    # `valuation_version` stamps the inputs (see VALUATION_CACHE_CODE_VERSION);
+    # a mismatch means recompute + refresh.
+    valuation_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    valuation_capex_total: Mapped[float | None] = mapped_column(Float, nullable=True)
+    valuation_market_median_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    valuation_price_deviation_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    valuation_price_deviation_adj_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    valuation_days_on_market: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    valuation_negotiation_leverage: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    valuation_fair_market_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    valuation_opening_offer: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(

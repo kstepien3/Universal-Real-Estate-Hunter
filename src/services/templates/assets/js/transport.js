@@ -50,6 +50,14 @@
                     return await ensureOk('/api/config');
                 },
 
+                async overview() {
+                    return await ensureOk('/api/overview');
+                },
+
+                async updateCheck() {
+                    return await ensureOk('/api/update');
+                },
+
                 async saveConfig(payload) {
                     return await ensureOk('/api/config', jsonOptions('POST', payload));
                 },

@@ -43,7 +43,39 @@
                 maxZoom: 19
             }).addTo(map);
 
-            markersGroup = L.featureGroup().addTo(map);
+            // Clustered price pins: thousands of listings collapse into count chips;
+            // spiderfy at max zoom keeps overlapping coordinates reachable.
+            // Falls back to a plain group if the vendored plugin failed to load.
+            const clusterOpts = {
+                maxClusterRadius: 60,
+                showCoverageOnHover: false,
+                spiderfyOnMaxZoom: true,
+                disableClusteringAtZoom: 17,
+                chunkedLoading: true,
+                chunkInterval: 200,
+                iconCreateFunction: function (cluster) {
+                    const n = cluster.getChildCount();
+                    return L.divIcon({
+                        html: '<div class="map-cluster"><span>' + n + '</span></div>',
+                        className: 'map-cluster-wrap',
+                        iconSize: [38, 38]
+                    });
+                }
+            };
+            markersGroup = (L.markerClusterGroup ? L.markerClusterGroup(clusterOpts) : L.featureGroup()).addTo(map);
+        }
+
+        let mapFittedProfileKey = null;
+
+        function fitMapToMarkers() {
+            if (!map || !markersGroup) return;
+            try {
+                const bounds = markersGroup.getBounds();
+                if (bounds.isValid()) {
+                    map.invalidateSize();
+                    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 15 });
+                }
+            } catch (e) {}
         }
 
         function ensureMapInitialized() {
@@ -240,6 +272,7 @@
 
             closeProfileMenu();
             renderProfileTabs();
+            restoreFilterState();
             applyFilters();
             if (profileId === 'ALL') {
                 showToast('Widok: Wszystkie profile');
@@ -368,6 +401,7 @@
         // ========================
         function switchConfigTab(tab) {
             const tabs = [
+                ['tabBtnOverview', 'configTabOverview', 'overview'],
                 ['tabBtnProfiles', 'configTabProfiles', 'profiles'],
                 ['tabBtnCapex', 'configTabCapex', 'capex'],
                 ['tabBtnScrapers', 'configTabScrapers', 'scrapers'],
@@ -387,6 +421,9 @@
             });
             if (tab === 'ai' && typeof checkLlmStatusIfEmpty === 'function') {
                 checkLlmStatusIfEmpty();
+            }
+            if (tab === 'overview') {
+                loadOverviewTab();
             }
         }
 
@@ -721,7 +758,7 @@
 
         function openConfigModal() {
             if (!activeConfig) return;
-            switchConfigTab('profiles');
+            switchConfigTab('overview');
 
             const sc = scrapersConfig || {};
             document.getElementById('cfgScraperOtodom').checked = sc.otodom ? sc.otodom.enabled !== false : true;
@@ -839,12 +876,189 @@
             }
         }
 
+        function timeAgoPl(iso) {
+            if (!iso) return 'brak danych';
+            const t = new Date(iso).getTime();
+            if (isNaN(t)) return '—';
+            const mins = Math.max(0, Math.round((Date.now() - t) / 60000));
+            if (mins < 1) return 'przed chwilą';
+            if (mins < 60) return `${mins} min temu`;
+            const h = Math.floor(mins / 60);
+            if (h < 24) return `${h} godz. temu`;
+            return `${Math.floor(h / 24)} dn. temu`;
+        }
+
+        function fmtBytes(n) {
+            if (n === null || n === undefined) return '—';
+            if (n < 1024) return `${n} B`;
+            if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
+            if (n < 1073741824) return `${(n / 1048576).toFixed(1)} MB`;
+            return `${(n / 1073741824).toFixed(2)} GB`;
+        }
+
+        function fmtInt(n) {
+            return (n === null || n === undefined) ? '—' : Number(n).toLocaleString('pl-PL');
+        }
+
+        async function loadOverviewTab() {
+            const box = document.getElementById('configOverviewBody');
+            if (!box) return;
+            try {
+                const ov = await Transport.overview();
+                box.innerHTML = renderOverview(ov || {});
+            } catch (e) {
+                box.innerHTML = '<div style="text-align: center; padding: 32px; color: var(--text-muted);">Nie udało się pobrać podsumowania.</div>';
+            }
+        }
+
+        function renderOverview(ov) {
+            const esc = (v) => escapeHtml(v === null || v === undefined ? '—' : String(v));
+            const row = (label, value) => `<div class="ov-row"><span class="ov-label">${esc(label)}</span><span class="ov-value num">${value}</span></div>`;
+            const rawRow = (label, html) => `<div class="ov-row"><span class="ov-label">${esc(label)}</span><span class="ov-value">${html}</span></div>`;
+            const section = (title, inner) => `<div class="ov-section"><div class="ov-title">${esc(title)}</div>${inner}</div>`;
+
+            const db = ov.database || {};
+            const sync = ov.sync || {};
+            const li = ov.listings || {};
+            const imgs = ov.images || {};
+            const cfg = ov.config || {};
+            const sched = cfg.scheduler || {};
+            const llm = cfg.llm || {};
+
+            const upd = ov.update || {};
+            const updHtml = upd.status === 'available' && upd.latest_version
+                ? `<a href="${escapeHtml(upd.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer">Dostępna ${escapeHtml(upd.latest_version)} → release notes</a>`
+                : upd.status === 'current'
+                    ? `✓ aktualna (${esc(ov.version || '—')})`
+                    : 'nie sprawdzono';
+            const appRows =
+                row('Wersja', esc(ov.version || '—')) +
+                rawRow('Aktualizacje', updHtml) +
+                row('Środowisko', esc(ov.environment === 'docker' ? 'Docker' : 'lokalnie')) +
+                row('Baza', `${esc(db.backend === 'postgresql' ? 'PostgreSQL' : 'SQLite')} · ${esc(fmtBytes(db.size_bytes))}`);
+
+            const syncStatus = sync.is_running
+                ? `w trakcie — ${esc(sync.current_portal || '')} ${esc(sync.current_step || '')} (${fmtInt(sync.items_scraped)})`
+                : 'bezczynne';
+            const schedText = sched.enabled === false
+                ? 'wyłączony'
+                : `co ${esc(sched.interval_minutes || 20)} min` +
+                  (sched.night_mode === false ? '' : ` · noc ${esc(sched.quiet_hours_start || '22:00')}–${esc(sched.quiet_hours_end || '07:00')} co ${esc(sched.night_interval_minutes || 60)} min`);
+            const syncRows =
+                rawRow('Status', syncStatus) +
+                row('Ostatnia synchronizacja', `${esc(sync.last_sync_at ? sync.last_sync_at.slice(0, 16).replace('T', ' ') : 'brak')} · ${esc(timeAgoPl(sync.last_sync_at))}`) +
+                row('Nowe (24 h)', fmtInt(sync.new_last_24h)) +
+                row('Harmonogram', schedText);
+
+            const profRows = ((li.by_profile || []).slice(0, 6)).map(p =>
+                `<div class="ov-row"><span class="ov-label">${esc(p.profile_name || p.profile_id)}</span><span class="ov-value num">${fmtInt(p.count)}</span></div>`
+            ).join('');
+            const dbRows =
+                row('Oferty łącznie', fmtInt(li.total)) +
+                row('Zakwalifikowane', `${fmtInt(li.qualified)} (whitelist ${fmtInt(li.whitelist)})`) +
+                row('Ulubione / Do wizyty / Odrzucone', `${fmtInt(li.favorites)} / ${fmtInt(li.to_visit)} / ${fmtInt(li.rejected)}`) +
+                (profRows ? `<div class="ov-sub">Per profil</div>${profRows}` : '');
+
+            const imgRows =
+                row('Cache obrazków', `${fmtInt(imgs.files)} plików · ${esc(fmtBytes(imgs.bytes))} z ${esc(fmtBytes(imgs.cap_bytes))}`) +
+                row('Retencja', `TTL ${esc(imgs.ttl_days ?? '—')} dni`);
+
+            const profNames = (cfg.profiles_enabled || []).map(esc).join(', ') || '—';
+            const scrapers = cfg.scrapers || {};
+            const portalNames = { otodom: 'Otodom', olx: 'OLX', nieruchomosci_online: 'Nier-online', morizon: 'Morizon' };
+            const portalsText = Object.keys(portalNames).map(k => {
+                const s = scrapers[k] || {};
+                return `${portalNames[k]} ${s.enabled === false ? '✗' : '✓'}`;
+            }).join(' · ');
+            const cfgRows =
+                row('Profile', `${fmtInt(cfg.profiles_total)} (wł.: ${profNames})`) +
+                rawRow('Portale', esc(portalsText)) +
+                row('AI', llm.enabled ? `wł. · ${esc(llm.provider || '?')} · ${esc(llm.model || '?')}` : 'wyłączone');
+
+            return section('Aplikacja', appRows) +
+                section('Synchronizacja', syncRows) +
+                section('Baza ofert', dbRows) +
+                section('Obrazki', imgRows) +
+                section('Konfiguracja', cfgRows);
+        }
+
         function setCfgCity(city) {
             document.getElementById('cfgCity').value = city;
         }
 
+        // Inline numeric validation for the config modal: marks bad fields instead of
+        // silently falling back to defaults. Hidden (provider-irrelevant) fields are skipped.
+        function validateConfigNumber(id, opts) {
+            opts = opts || {};
+            const el = document.getElementById(id);
+            if (!el || el.offsetParent === null) return true;
+            el.classList.remove('input-error');
+            const raw = (el.value || '').trim();
+            let ok;
+            if (opts.pattern) {
+                ok = opts.pattern.test(raw);
+            } else {
+                const num = opts.integer ? parseInt(raw, 10) : parseFloat(raw);
+                ok = raw !== '' && !isNaN(num);
+                if (ok && opts.min !== undefined) ok = num >= opts.min;
+                if (ok && opts.max !== undefined) ok = num <= opts.max;
+            }
+            if (!ok) el.classList.add('input-error');
+            return ok;
+        }
+
+        function configTabForField(id) {
+            if (/cfg(Pages|Scraper|RequestDelay)/.test(id)) return 'scrapers';
+            if (/cfg(Scheduler|Interval|Night|Quiet)/.test(id)) return 'scheduler';
+            if (/cfgCapex/.test(id)) return 'capex';
+            return 'ai';
+        }
+
+        function validateConfiguration() {
+            const checks = [
+                ['cfgPagesOtodom', { integer: true, min: 1, max: 50 }],
+                ['cfgPagesOlx', { integer: true, min: 1, max: 50 }],
+                ['cfgPagesNieruchomosci', { integer: true, min: 1, max: 50 }],
+                ['cfgPagesMorizon', { integer: true, min: 1, max: 50 }],
+                ['cfgRequestDelay', { min: 0, max: 30 }],
+                ['cfgIntervalMinutes', { integer: true, min: 1, max: 1440 }],
+                ['cfgNightIntervalMinutes', { integer: true, min: 1, max: 1440 }],
+                ['cfgQuietStart', { pattern: /^\d{2}:\d{2}$/ }],
+                ['cfgQuietEnd', { pattern: /^\d{2}:\d{2}$/ }],
+                ['cfgCapexDeveloper', { min: 0 }],
+                ['cfgCapexRenovation', { min: 0 }],
+                ['cfgCapexAgency', { min: 0, max: 100 }],
+                ['cfgLocalTimeout', { min: 1, max: 3600 }],
+                ['cfgOllamaTimeout', { min: 1, max: 3600 }],
+                ['cfgCloudTimeout', { min: 1, max: 600 }],
+                ['cfgLocalTemperature', { min: 0, max: 2 }],
+                ['cfgOllamaTemperature', { min: 0, max: 2 }],
+                ['cfgLocalNumCtx', { integer: true, min: 512, max: 1048576 }],
+                ['cfgOllamaNumCtx', { integer: true, min: 512, max: 1048576 }]
+            ];
+            let firstBad = null;
+            for (const [id, opts] of checks) {
+                if (!validateConfigNumber(id, opts) && !firstBad) firstBad = id;
+            }
+            if (firstBad) {
+                try {
+                    switchConfigTab(configTabForField(firstBad));
+                    const badEl = document.getElementById(firstBad);
+                    if (badEl) badEl.focus();
+                } catch (e) {}
+                showToast('Popraw podświetlone pola konfiguracji.');
+            }
+            return !firstBad;
+        }
+
         async function saveConfiguration(triggerScrapingImmediately = false) {
+            const listingsKeyBefore = JSON.stringify({
+                profiles: (activeConfig && activeConfig.profiles) || [],
+                scrapers: scrapersConfig || {}
+            });
             saveCurrentFormIntoMemory();
+
+            if (!validateConfiguration()) return;
 
             const scrapersPayload = {
                 otodom: {
@@ -923,9 +1137,12 @@
 
                 await fetchConfig();
 
+                // Skip the full listings refetch when only non-listing settings
+                // (AI / CAPEX / scheduler) changed — nothing on the cards moved.
+                const listingsKeyAfter = JSON.stringify({ profiles: payload.profiles, scrapers: payload.scrapers });
                 if (triggerScrapingImmediately) {
                     triggerScrape();
-                } else {
+                } else if (listingsKeyAfter !== listingsKeyBefore) {
                     await fetchListings();
                 }
             } catch (err) {
@@ -992,6 +1209,7 @@
                 updateStats(baseListings);
 
                 if (firstLoad) {
+                    restoreFilterState();
                     applyFilters();
                     return;
                 }
@@ -1130,6 +1348,7 @@
             if (document.getElementById('perspectiveSelect')) document.getElementById('perspectiveSelect').value = 'ALL';
             currentPerspective = 'ALL';
             if (document.getElementById('searchInput')) document.getElementById('searchInput').value = '';
+            if (document.getElementById('sortSelect')) document.getElementById('sortSelect').value = 'score_desc';
             setFilter('ALL');
         }
 
@@ -1248,6 +1467,48 @@
             renderGrid(filtered);
             renderMapMarkers(filtered);
             renderFilterTokens();
+            saveFilterState();
+        }
+
+        // Persist filter + sort + search state per profile so a reload keeps the session.
+        const FILTER_STATE_IDS = ['filterCategory', 'filterMaxPrice', 'filterMinArea', 'filterMaxArea', 'filterMinPlot', 'filterMarket', 'filterBuildingType', 'filterFinish', 'filterVis', 'filterSewerage', 'filterHeating', 'filterMinRooms', 'filterMinYear', 'filterExactLoc', 'filterPerspective', 'perspectiveSelect', 'searchInput', 'sortSelect'];
+
+        function filterStateKey() {
+            return 'hunter_filters_' + (selectedProfileId || 'ALL');
+        }
+
+        function saveFilterState() {
+            try {
+                const state = { currentFilter: currentFilter, currentPerspective: currentPerspective };
+                for (const id of FILTER_STATE_IDS) {
+                    const el = document.getElementById(id);
+                    if (el) state[id] = el.value;
+                }
+                localStorage.setItem(filterStateKey(), JSON.stringify(state));
+            } catch (e) {}
+        }
+
+        function restoreFilterState() {
+            let state = null;
+            try {
+                state = JSON.parse(localStorage.getItem(filterStateKey()) || 'null');
+            } catch (e) {}
+            if (!state) return;
+            for (const id of FILTER_STATE_IDS) {
+                const el = document.getElementById(id);
+                if (el && state[id] !== undefined) el.value = state[id];
+            }
+            if (state.currentFilter) {
+                document.querySelectorAll('.pipe-item').forEach(b => b.classList.toggle('active', b.dataset.filter === state.currentFilter));
+                currentFilter = state.currentFilter;
+            }
+            if (state.currentPerspective) {
+                currentPerspective = state.currentPerspective;
+                const sel = document.getElementById('perspectiveSelect');
+                if (sel) sel.value = state.currentPerspective;
+                const selMob = document.getElementById('filterPerspective');
+                if (selMob) selMob.value = state.currentPerspective;
+            }
         }
 
         function applyFiltersIncremental(changedSet, removedSet) {
@@ -1349,6 +1610,59 @@
             document.body.classList.remove('filters-open');
         }
 
+        // Desktop mouse users can't swipe the pipeline row: vertical wheel scrolls
+        // it horizontally and press-drag pans it (touch keeps the native swipe).
+        // At the scroll extremes the wheel event is left alone so the page still scrolls.
+        function bindPipelineScroll() {
+            const pipe = document.querySelector('.pipeline');
+            if (!pipe || pipe.dataset.scrollBound) return;
+            pipe.dataset.scrollBound = '1';
+            pipe.addEventListener('wheel', (e) => {
+                if (Math.abs(e.deltaY) <= Math.abs(e.deltaX)) return;
+                if (pipe.scrollWidth <= pipe.clientWidth + 1) return;
+                const max = pipe.scrollWidth - pipe.clientWidth;
+                if ((e.deltaY < 0 && pipe.scrollLeft <= 0) || (e.deltaY > 0 && pipe.scrollLeft >= max - 1)) return;
+                e.preventDefault();
+                pipe.scrollLeft += e.deltaY;
+            }, { passive: false });
+
+            let dragX = 0;
+            let dragLeft = 0;
+            let dragging = false;
+            let moved = false;
+            pipe.addEventListener('pointerdown', (e) => {
+                if (e.pointerType !== 'mouse' || e.button !== 0) return;
+                if (pipe.scrollWidth <= pipe.clientWidth + 1) return;
+                dragging = true;
+                moved = false;
+                dragX = e.clientX;
+                dragLeft = pipe.scrollLeft;
+            });
+            pipe.addEventListener('pointermove', (e) => {
+                if (!dragging || e.pointerType !== 'mouse') return;
+                const dx = e.clientX - dragX;
+                if (!moved && Math.abs(dx) < 6) return;
+                moved = true;
+                pipe.classList.add('dragging');
+                pipe.scrollLeft = dragLeft - dx;
+            });
+            const endDrag = () => {
+                dragging = false;
+                pipe.classList.remove('dragging');
+            };
+            pipe.addEventListener('pointerup', endDrag);
+            pipe.addEventListener('pointercancel', endDrag);
+            pipe.addEventListener('pointerleave', endDrag);
+            // A press-drag must not activate the pipe button released over.
+            pipe.addEventListener('click', (e) => {
+                if (moved) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    moved = false;
+                }
+            }, true);
+        }
+
         function formatShortPrice(price) {
             if (!price || isNaN(price) || price <= 0) return 'b/d';
             return price >= 1e6
@@ -1359,7 +1673,7 @@
         // ========================
         // Map markers
         // ========================
-        function addMapMarker(item) {
+        function addMapMarker(item, deferAdd) {
             let pinClass = "pin-blue";
             const cat = item.category || 'dom';
 
@@ -1401,9 +1715,8 @@
 
             const marker = L.marker([jitterLat, jitterLon], { icon: icon });
 
-            const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=400&q=80";
-            const fullImg = item.main_image_url || fallbackImg;
-            const imgSrc = thumbUrl(item.main_image_url) || fallbackImg;
+            const fullImg = item.main_image_url || LOCAL_PLACEHOLDER;
+            const imgSrc = thumbUrl(item.main_image_url) || LOCAL_PLACEHOLDER;
             const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : 'b/d';
             const precisionText = item.is_exact_coords ? 'Lokalizacja dokładna' : 'Lokalizacja przybliżona (rejon)';
             const precisionColor = item.is_exact_coords ? 'var(--slate-text)' : 'var(--amber-text)';
@@ -1413,7 +1726,7 @@
 
             const popupHtml = `
                 <div class="popup-card">
-                    <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.src='${fallbackImg}'" onclick="openImgModal('${escapeHtml(fullImg)}')">
+                    <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.onerror=null;this.src='${LOCAL_PLACEHOLDER}'" onclick="openImgModal('${escapeHtml(fullImg)}')">
                     <div class="popup-body">
                         <div class="popup-price num">${Math.round(item.price).toLocaleString('pl-PL')} zł</div>
                         <div class="popup-title"><a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.title)}</a></div>
@@ -1442,7 +1755,9 @@
                 if (card) card.classList.remove('card-hover-highlight');
             });
 
-            markersGroup.addLayer(marker);
+            if (!deferAdd) {
+                markersGroup.addLayer(marker);
+            }
             markersMap[item.id] = marker;
             return marker;
         }
@@ -1455,24 +1770,37 @@
             coordCounts = {};
 
             const validCoordsItems = items.filter(i => i.latitude && i.longitude);
+            const built = [];
+            for (const item of validCoordsItems) {
+                const m = addMapMarker(item, true);
+                if (m) built.push(m);
+            }
+            if (built.length > 0 && markersGroup.addLayers) {
+                markersGroup.addLayers(built);
+            } else {
+                for (const m of built) markersGroup.addLayer(m);
+            }
 
-            validCoordsItems.forEach(addMapMarker);
+            if (aqiLayerActive) {
+                renderAqiMapLayer(items);
+            }
 
-            if (validCoordsItems.length > 0) {
-                try {
-                    if (map) map.invalidateSize();
-                    if (validCoordsItems.length === 1) {
+            // Preserve the user's pan/zoom across filter changes; re-fit only on
+            // first render, profile switch, or explicit "Dopasuj" click.
+            const profileKey = selectedProfileId || 'ALL';
+            if (mapFittedProfileKey !== profileKey) {
+                mapFittedProfileKey = profileKey;
+                if (validCoordsItems.length === 1) {
+                    try {
+                        map.invalidateSize();
                         map.setView(
                             [validCoordsItems[0].latitude, validCoordsItems[0].longitude],
                             15
                         );
-                    } else {
-                        map.fitBounds(markersGroup.getBounds(), { padding: [40, 40], maxZoom: 15 });
-                    }
-                } catch (e) {}
-            }
-            if (aqiLayerActive) {
-                renderAqiMapLayer(items);
+                    } catch (e) {}
+                } else {
+                    fitMapToMarkers();
+                }
             }
         }
 
@@ -1620,10 +1948,14 @@
                 switchViewMode('split');
             }
             if (map) {
-                map.flyTo([lat, lon], 15, { duration: 0.8 });
                 const marker = markersMap[id];
-                if (marker) {
+                if (marker && markersGroup && markersGroup.zoomToShowLayer) {
+                    markersGroup.zoomToShowLayer(marker, () => marker.openPopup());
+                } else if (marker) {
+                    map.flyTo([lat, lon], 15, { duration: 0.8 });
                     setTimeout(() => { marker.openPopup(); }, 700);
+                } else {
+                    map.flyTo([lat, lon], 15, { duration: 0.8 });
                 }
             }
         }
@@ -1636,7 +1968,7 @@
 
         function previewCardThumb(cardId, src, thumbEl, idx, total) {
             const img = document.getElementById('card-img-' + cardId);
-            if (img) img.src = proxyImg(src);
+            if (img) img.src = proxyImg(src, 'card');
             const counter = document.getElementById('imgcount-' + cardId);
             if (counter && total) counter.innerText = `${idx + 1}/${total}`;
             if (thumbEl && thumbEl.parentElement) {
@@ -1645,11 +1977,20 @@
             }
         }
 
-        function openListingGallery(itemId, startIndex) {
+        async function openListingGallery(itemId, startIndex) {
             const item = allListings.find(i => i.id === itemId);
             if (!item) return;
-            const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80";
-            const gallery = (item.gallery_images && item.gallery_images.length > 0) ? item.gallery_images : [item.main_image_url || fallbackImg];
+            let gallery = (item.gallery_images && item.gallery_images.length > 0) ? item.gallery_images.slice() : [item.main_image_url || LOCAL_PLACEHOLDER];
+            // The list payload caps thumbnails; fetch the full record when more exist.
+            const totalCount = item.gallery_count || gallery.length;
+            if (totalCount > gallery.length) {
+                try {
+                    const detail = await Transport.listingDetail(itemId);
+                    if (detail && Array.isArray(detail.gallery_images) && detail.gallery_images.length > 0) {
+                        gallery = detail.gallery_images;
+                    }
+                } catch (e) { /* fall back to the capped in-memory gallery */ }
+            }
             activeModalGallery = gallery;
             activeModalIndex = Math.max(0, Math.min(startIndex || 0, gallery.length - 1));
             showModalImage();
@@ -1669,7 +2010,7 @@
             const img = document.getElementById('imgModalSrc');
             const cap = document.getElementById('imgModalCaption');
             if (!img || activeModalGallery.length === 0) return;
-            img.src = proxyImg(activeModalGallery[activeModalIndex]);
+            img.src = proxyImg(activeModalGallery[activeModalIndex], 'large');
             if (cap) {
                 cap.innerText = `${activeModalIndex + 1} / ${activeModalGallery.length}`;
             }
@@ -1859,7 +2200,6 @@
         }
 
         function buildCardHtml(item, isFirstCard = false) {
-            const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80";
 
             let badgeClass = "badge-rejected";
             let badgeLabel = "Odrzucona";
@@ -1910,7 +2250,7 @@
             }
 
             const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : '';
-            const imgSrc = thumbUrl(item.main_image_url) || fallbackImg;
+            const imgSrc = thumbUrl(item.main_image_url) || LOCAL_PLACEHOLDER;
             const imgLoading = isFirstCard ? 'eager' : 'lazy';
             const imgFetchPriority = isFirstCard ? ' fetchpriority="high"' : '';
 
@@ -1945,10 +2285,10 @@
             let rejectionHtml = "";
             if (item.filter_reasons && item.filter_reasons.length > 0 && !item.is_qualified) {
                 rejectionHtml = `
-                    <div class="rejection-box">
-                        <span class="rejection-label">Kryterium wykluczające</span>
+                    <details class="rejection-box">
+                        <summary><span class="rejection-label">Kryterium wykluczające (${item.filter_reasons.length})</span></summary>
                         <ul>${item.filter_reasons.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
-                    </div>
+                    </details>
                 `;
             }
 
@@ -1961,10 +2301,11 @@
             const mpzpZoneText = item.mpzp_zone ? escapeHtml(item.mpzp_zone.length > 25 ? item.mpzp_zone.slice(0, 25) + '…' : item.mpzp_zone) : '';
             const floodWarn = item.flood_risk_zone === 'ZAGROZENIE_POWODZIOWE';
 
-            // Contextual 3×3 technical grid — always exactly 9 cells, '—' fallback for missing data
+            // Contextual technical grid — empty cells are hidden instead of '—' noise
             const specCell = (label, value) => {
                 const has = value !== null && value !== undefined && String(value).trim() !== '';
-                return `<div class="spec-cell"><span class="spec-label">${label}</span><span class="spec-value${has ? '' : ' spec-value-empty'}">${has ? value : '—'}</span></div>`;
+                if (!has) return '';
+                return `<div class="spec-cell"><span class="spec-label">${label}</span><span class="spec-value">${value}</span></div>`;
             };
 
             const yearText = item.year_built ? `${item.year_built}` : '';
@@ -2033,21 +2374,22 @@
                 : '';
 
             const gallery = item.gallery_images || [];
-            const galleryCount = gallery.length > 0 ? gallery.length : 1;
-            const galleryCountBadge = galleryCount > 1
-                ? `<span class="card-media-count num" id="imgcount-${item.id}">1/${galleryCount}</span>`
+            // The list payload carries the first thumbnails only; gallery_count is the true total.
+            const totalCount = item.gallery_count || gallery.length;
+            const galleryCountBadge = totalCount > 1
+                ? `<span class="card-media-count num" id="imgcount-${item.id}">1/${totalCount}</span>`
                 : '';
 
             let galleryThumbnailsHtml = '';
             if (gallery.length > 1) {
                 const thumbs = gallery.slice(0, 5).map((imgUrl, idx) => `
-                    <img src="${escapeHtml(thumbUrl(imgUrl))}" class="card-thumb ${idx === 0 ? 'active' : ''}"
+                    <img src="${escapeHtml(proxyImg(imgUrl, 'thumb'))}" class="card-thumb ${idx === 0 ? 'active' : ''}"
                          alt="Miniatura ${idx + 1}" loading="lazy"
-                         onmouseenter="previewCardThumb(${item.id}, '${escapeHtml(imgUrl)}', this, ${idx}, ${gallery.length})"
+                         onmouseenter="previewCardThumb(${item.id}, '${escapeHtml(imgUrl)}', this, ${idx}, ${totalCount})"
                          onclick="event.stopPropagation(); openListingGallery(${item.id}, ${idx})"
                          onerror="this.style.display='none'">
                 `).join('');
-                const moreCount = gallery.length - 5;
+                const moreCount = totalCount - 5;
                 const moreHtml = moreCount > 0 ? `<span class="thumb-more" onclick="event.stopPropagation(); openListingGallery(${item.id}, 5)">+${moreCount}</span>` : '';
                 galleryThumbnailsHtml = `<div class="card-gallery-strip">${thumbs}${moreHtml}</div>`;
             }
@@ -2120,7 +2462,7 @@
             return `
             <article class="card ${cardCrmClass}" id="card-${item.id}" onmouseenter="highlightMapMarker(${item.id}, true)" onmouseleave="highlightMapMarker(${item.id}, false)">
                 <div class="card-media" onclick="openListingGallery(${item.id}, 0)">
-                    <img id="card-img-${item.id}" src="${escapeHtml(imgSrc)}" alt="Zdjęcie nieruchomości" loading="${imgLoading}" decoding="async"${imgFetchPriority} onerror="this.src='${fallbackImg}'">
+                    <img id="card-img-${item.id}" src="${escapeHtml(imgSrc)}" alt="Zdjęcie nieruchomości" loading="${imgLoading}" decoding="async"${imgFetchPriority} onerror="this.onerror=null;this.src='${LOCAL_PLACEHOLDER}'">
                     ${galleryCountBadge}
                     <div class="card-media-topbar">
                         <div class="card-badges-group">
@@ -2221,22 +2563,21 @@
             return Math.round(Number(val)).toLocaleString('pl-PL') + ' zł';
         }
 
+        // Local first-party placeholder for listings without photos (no third-party calls).
+        const LOCAL_PLACEHOLDER = '/assets/img/placeholder.svg';
+
         // Route an image through the first-party /img proxy (removes third-party cookies).
-        function proxyImg(url) {
+        // `size` selects a server-rendered derivative: orig (verbatim), card (640x360
+        // exact 16:9 crop), thumb (160x90 strip), large (bounded 1280px lightbox).
+        function proxyImg(url, size) {
             if (!url) return url;
-            return '/img?url=' + encodeURIComponent(url);
+            const s = size || 'orig';
+            return '/img?url=' + encodeURIComponent(url) + (s === 'orig' ? '' : '&size=' + s);
         }
 
-        // Rewrite portal CDN URLs to a small thumbnail variant for cards.
-        // OLX / Otodom (apollo.olxcdn.com) support on-the-fly resize via ";s=WxH".
-        function thumbUrl(url, size) {
-            if (!url) return url;
-            const s = size || '480x360';
-            let out = url;
-            if (url.indexOf('apollo.olxcdn.com') !== -1 && /;s=\d+x\d+/i.test(url)) {
-                out = url.replace(/;s=\d+x\d+/i, ';s=' + s).replace(/;q=\d+/, ';q=70');
-            }
-            return proxyImg(out);
+        // Canonical card thumbnail: server-rendered 16:9 derivative for cards/popups.
+        function thumbUrl(url) {
+            return proxyImg(url, 'card');
         }
 
         // ========================
@@ -3110,7 +3451,23 @@
             }
         });
 
+        async function refreshUpdateDot() {
+            const dot = document.getElementById('updateDot');
+            if (!dot) return;
+            try {
+                const st = await Transport.updateCheck();
+                const show = !!st && st.status === 'available';
+                dot.hidden = !show;
+                const btn = document.getElementById('btnSettings');
+                if (btn) btn.title = show ? `Dostępna nowa wersja ${st.latest_version || ''} — sprawdź Podsumowanie` : 'Ustawienia';
+            } catch (e) {
+                dot.hidden = true;
+            }
+        }
+
         window.addEventListener('DOMContentLoaded', async () => {
+            bindPipelineScroll();
+            refreshUpdateDot();
             await fetchConfig();
             await fetchListings();
             checkActiveScrape();

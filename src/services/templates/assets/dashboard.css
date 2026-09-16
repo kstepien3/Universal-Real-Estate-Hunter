@@ -269,6 +269,18 @@
 
         /* Secondary header actions: never shrink, condense to icons on mobile */
         .topbar-icon-btn { flex: none; flex-shrink: 0; height: 28px; padding: 0 8px; }
+        #btnSettings { position: relative; }
+        .update-dot {
+            position: absolute;
+            top: 3px;
+            right: 3px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--amber-text);
+            box-shadow: 0 0 0 2px var(--surface);
+            pointer-events: none;
+        }
         .topbar-sync-btn {
             flex: none;
             flex-shrink: 0;
@@ -1098,6 +1110,23 @@
 
         .popup-card { width: 220px; }
         .popup-img { width: 100%; height: 110px; object-fit: cover; border-radius: var(--r-sm); cursor: zoom-in; border: 1px solid var(--border); }
+
+        /* MarkerCluster chips in dashboard palette (custom iconCreateFunction) */
+        .map-cluster-wrap { background: transparent; border: none; }
+        .map-cluster {
+            width: 38px; height: 38px;
+            border-radius: 50%;
+            background: rgba(9, 10, 15, 0.9);
+            border: 1px solid var(--blue-border);
+            color: var(--blue-text);
+            display: flex; align-items: center; justify-content: center;
+            font-family: var(--font-mono);
+            font-size: 12px; font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            cursor: pointer;
+        }
+        .map-cluster:hover { border-color: var(--blue-text); }
         .popup-body { padding-top: 8px; display: flex; flex-direction: column; gap: 3px; }
         .popup-price { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); }
         .popup-title { font-size: var(--font-size-sm); color: var(--text-secondary); }
@@ -1496,6 +1525,29 @@
             margin-bottom: 2px;
         }
         .rejection-box ul { list-style: none; display: flex; flex-direction: column; gap: 1px; }
+        details.rejection-box > summary {
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        details.rejection-box > summary::-webkit-details-marker { display: none; }
+        details.rejection-box > summary::before {
+            content: '+';
+            color: var(--red-text);
+            font-weight: 700;
+            flex: none;
+        }
+        details.rejection-box[open] > summary::before { content: '−'; }
+        details.rejection-box > summary .rejection-label { margin-bottom: 0; }
+        details.rejection-box > ul { margin-top: 4px; }
+
+        /* Config modal: invalid numeric input */
+        .input-error {
+            border-color: var(--red-text) !important;
+            background: rgba(239, 68, 68, 0.07) !important;
+        }
 
         /* Features (pros/cons) */
         .card-features ul { list-style: none; display: flex; flex-direction: column; gap: 2px; }
@@ -1698,6 +1750,35 @@
         }
         #configModal.open { display: flex; }
         body.config-open { overflow: hidden !important; }
+
+        /* Overview (Podsumowanie) read-only tab */
+        .ov-section { margin-bottom: 14px; }
+        .ov-section:last-child { margin-bottom: 2px; }
+        .ov-title {
+            font-size: var(--font-size-2xs);
+            font-weight: var(--font-weight-semibold);
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+            padding-bottom: 4px;
+            border-bottom: 1px solid var(--border);
+        }
+        .ov-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            gap: 12px;
+            padding: 3px 0;
+            font-size: var(--font-size-sm);
+        }
+        .ov-label { color: var(--text-secondary); flex: none; }
+        .ov-value { color: var(--text-primary); text-align: right; min-width: 0; overflow-wrap: anywhere; }
+        .ov-sub {
+            font-size: var(--font-size-2xs);
+            color: var(--text-faint);
+            margin: 6px 0 2px;
+        }
 
         .config-card {
             width: 100%;
@@ -2944,7 +3025,17 @@
                 mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
                 -webkit-mask-image: linear-gradient(to right, black calc(100% - 24px), transparent 100%);
             }
-            .pipeline::-webkit-scrollbar { display: none; }
+        .pipeline::-webkit-scrollbar { display: none; }
+
+        /* Desktop (fine pointer): a thin visible scrollbar so clipped pipe items
+           are recognizably scrollable — touch devices keep the clean look. */
+        @media (hover: hover) and (pointer: fine) {
+            .pipeline { scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; cursor: grab; }
+            .pipeline::-webkit-scrollbar { display: block; height: 6px; }
+            .pipeline::-webkit-scrollbar-track { background: transparent; }
+            .pipeline::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+            .pipeline.dragging, .pipeline.dragging * { cursor: grabbing !important; user-select: none !important; }
+        }
             .pipe-divider { margin: 4px 0; flex: none; flex-shrink: 0; }
             .perspective-wrap { display: none !important; }
 
