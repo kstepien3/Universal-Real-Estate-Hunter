@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.13.1 (2026-09-16)
+
+### Bug Fixes
+
+- **ui**: Enlarge split-view card photos to 500px max-height
+  ([`c382e16`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/c382e160c5194142988a0e59bc7f8b6a0f421dda))
+
+
 ## v1.13.0 (2026-09-16)
 
 ### Features
