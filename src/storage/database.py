@@ -306,6 +306,15 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("first_seen_at", "DATETIME", "TIMESTAMP WITH TIME ZONE"),
     ("initial_price", "FLOAT", "DOUBLE PRECISION"),
     ("relist_count", "INTEGER DEFAULT 0", "INTEGER DEFAULT 0"),
+    ("valuation_version", "VARCHAR(64)", "VARCHAR(64)"),
+    ("valuation_capex_total", "FLOAT", "DOUBLE PRECISION"),
+    ("valuation_market_median_m2", "FLOAT", "DOUBLE PRECISION"),
+    ("valuation_price_deviation_pct", "FLOAT", "DOUBLE PRECISION"),
+    ("valuation_price_deviation_adj_pct", "FLOAT", "DOUBLE PRECISION"),
+    ("valuation_days_on_market", "INTEGER", "INTEGER"),
+    ("valuation_negotiation_leverage", "VARCHAR(20)", "VARCHAR(20)"),
+    ("valuation_fair_market_value", "FLOAT", "DOUBLE PRECISION"),
+    ("valuation_opening_offer", "FLOAT", "DOUBLE PRECISION"),
 ]
 
 
