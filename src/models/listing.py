@@ -70,6 +70,11 @@ def apply_if_present(target: Any, source: Any, fields: tuple[str, ...], *, fill_
         setattr(target, field, value)
 
 
+def copy_spatial_fields(target: Any, source: Any, *, fill_missing: bool = False) -> None:
+    """Consolidated helper to copy all spatial & environmental fields in one call."""
+    apply_if_present(target, source, SPATIAL_FIELDS, fill_missing=fill_missing)
+
+
 _E = TypeVar("_E")
 
 
@@ -129,7 +134,7 @@ def restore_cached_details(listing: "ListingSchema", existing_model: Any) -> Non
     if getattr(existing_model, "relist_count", None):
         listing.relist_count = existing_model.relist_count
 
-    apply_if_present(listing, existing_model, GEO_FIELDS, fill_missing=True)
+    copy_spatial_fields(listing, existing_model, fill_missing=True)
 
 
 class Coordinates(BaseModel):

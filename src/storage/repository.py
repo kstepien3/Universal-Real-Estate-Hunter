@@ -8,14 +8,14 @@ from sqlalchemy import delete, desc, or_, select, update
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.listing import SPATIAL_FIELDS, FilterResult, ListingSchema, apply_if_present
+from src.models.listing import FilterResult, ListingSchema, copy_spatial_fields
 
 from .database import safe_commit
 from .models import ListingModel, PriceHistoryModel
 
 
 def _val(v: Any) -> str:
-    return getattr(v, "value", str(v) if v is not None else "")
+    return str(v.value if hasattr(v, "value") else (v or ""))
 
 
 def _apply_ai_fields(model: ListingModel, result: FilterResult) -> None:
@@ -54,6 +54,117 @@ def _apply_llm_cache_fields(
         model.llm_prompt_version = str(prompt_version)
     if llm_model := llm_cache.get("model"):
         model.llm_model = str(llm_model)
+
+
+def _populate_listing_model(
+    model: ListingModel,
+    listing: ListingSchema,
+    filter_result: FilterResult,
+    is_exact_coords: bool = True,
+    llm_cache: dict[str, Any] | None = None,
+    is_new: bool = False,
+) -> None:
+    """Consolidated declarative mapper from ListingSchema & FilterResult onto ListingModel.
+    Eliminates duplicate 60-field assignments across INSERT and UPDATE paths."""
+    model.title = listing.title
+    model.price = listing.price
+    model.price_per_m2 = listing.price_per_m2
+    model.area_home = listing.area_home
+    model.area_plot = listing.area_plot
+    model.category = _val(listing.category)
+
+    if listing.rooms is not None or is_new:
+        model.rooms = listing.rooms
+    if listing.floor is not None or is_new:
+        model.floor = listing.floor
+    if listing.floors_in_building is not None or is_new:
+        model.floors_in_building = listing.floors_in_building
+    if listing.is_private_owner is not None or is_new:
+        model.is_private_owner = listing.is_private_owner
+    if listing.profile_id or is_new:
+        model.profile_id = listing.profile_id
+    if listing.profile_name or is_new:
+        model.profile_name = listing.profile_name
+
+    model.building_type = listing.building_type.value
+    model.segment_subtype = listing.segment_subtype.value
+    model.location_raw = listing.location_raw
+    model.street = listing.street or (model.street if not is_new else None)
+    model.district = listing.district or (model.district if not is_new else None)
+    model.city = listing.city or (model.city if not is_new else None)
+
+    if listing.coordinates:
+        model.latitude, model.longitude = listing.coordinates
+    if is_new or is_exact_coords:
+        model.is_exact_coords = is_exact_coords
+
+    model.access_road_type = _val(listing.access_road_type)
+    model.market = _val(listing.market)
+    model.finish_condition = _val(listing.finish_condition)
+
+    # Sticky-True flags
+    if listing.has_visualisations:
+        model.has_visualisations = True
+    elif is_new:
+        model.has_visualisations = False
+
+    model.sewerage = _val(listing.sewerage)
+    model.heating = _val(listing.heating)
+
+    if listing.has_fiber:
+        model.has_fiber = True
+    elif is_new:
+        model.has_fiber = False
+
+    if listing.year_built or is_new:
+        model.year_built = listing.year_built
+    if listing.main_image_url or is_new:
+        model.main_image_url = listing.main_image_url
+    if listing.gallery_images or is_new:
+        model.gallery_images = listing.gallery_images
+    if listing.raw_description or is_new:
+        model.raw_description = listing.raw_description
+
+    # Cadastral & Geoportal fields
+    if listing.parcel_id or is_new:
+        model.parcel_id = listing.parcel_id
+    if listing.cadastral_area or is_new:
+        model.cadastral_area = listing.cadastral_area
+    if listing.geoportal_url or is_new:
+        model.geoportal_url = listing.geoportal_url
+    if listing.mpzp_zone or is_new:
+        model.mpzp_zone = listing.mpzp_zone
+    if listing.mpzp_status or is_new:
+        model.mpzp_status = listing.mpzp_status
+    if listing.flood_risk_zone or is_new:
+        model.flood_risk_zone = listing.flood_risk_zone
+    if listing.gesut_networks or is_new:
+        model.gesut_networks_data = listing.gesut_networks
+
+    copy_spatial_fields(model, listing)
+
+    # Qualification findings
+    model.is_qualified = filter_result.is_qualified
+    model.qualification_status = filter_result.status.value
+    model.qualification_score = filter_result.score
+    model.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
+    model.pros = filter_result.pros
+    model.cons = filter_result.cons
+
+    _apply_ai_fields(model, filter_result)
+    _apply_llm_cache_fields(model, llm_cache)
+
+    if listing.physical_fingerprint or is_new:
+        model.physical_fingerprint = listing.physical_fingerprint
+    if listing.relist_count > 0:
+        model.relist_count = max(model.relist_count or 0, listing.relist_count)
+    model.first_seen_at = listing.first_seen_at or model.first_seen_at or model.created_at
+    model.initial_price = model.initial_price or listing.initial_price or listing.price
+    model.listing_status = "ACTIVE"
+    now_utc = datetime.now(UTC)
+    model.last_scraped_at = now_utc
+    if not is_new:
+        model.updated_at = now_utc
 
 
 # In-process medians cache (TTL) to avoid a full-table scan every cycle.
@@ -179,87 +290,14 @@ class ListingRepository:
             price_changed = abs(existing.price - listing.price) >= 1.0
             old_price = existing.price
 
-            existing.title = listing.title
-            existing.price = listing.price
-            existing.price_per_m2 = listing.price_per_m2
-            existing.area_home = listing.area_home
-            existing.area_plot = listing.area_plot
-            existing.category = _val(listing.category)
-            if listing.rooms is not None:
-                existing.rooms = listing.rooms
-            if listing.floor is not None:
-                existing.floor = listing.floor
-            if listing.floors_in_building is not None:
-                existing.floors_in_building = listing.floors_in_building
-            if listing.is_private_owner is not None:
-                existing.is_private_owner = listing.is_private_owner
-            if listing.profile_id:
-                existing.profile_id = listing.profile_id
-            if listing.profile_name:
-                existing.profile_name = listing.profile_name
-            existing.building_type = listing.building_type.value
-            existing.segment_subtype = listing.segment_subtype.value
-            existing.location_raw = listing.location_raw
-            existing.street = listing.street or existing.street
-            existing.district = listing.district or existing.district
-            existing.city = listing.city or existing.city
-            if lat and lon:
-                existing.latitude = lat
-                existing.longitude = lon
-            existing.access_road_type = _val(listing.access_road_type)
-            existing.market = _val(listing.market)
-            existing.finish_condition = _val(listing.finish_condition)
-            # Sticky-True: False from a scraper means "not detected", not
-            # "confirmed absent" (e.g. Otodom never detects fiber). Only
-            # positive evidence flips the flag to True.
-            if listing.has_visualisations:
-                existing.has_visualisations = True
-            existing.sewerage = _val(listing.sewerage)
-            existing.heating = _val(listing.heating)
-            if listing.has_fiber:
-                existing.has_fiber = True
-            if listing.year_built:
-                existing.year_built = listing.year_built
-            if listing.main_image_url:
-                existing.main_image_url = listing.main_image_url
-            if listing.gallery_images:
-                existing.gallery_images = listing.gallery_images
-            if listing.raw_description:
-                existing.raw_description = listing.raw_description
-            if listing.parcel_id:
-                existing.parcel_id = listing.parcel_id
-            if listing.cadastral_area:
-                existing.cadastral_area = listing.cadastral_area
-            if listing.geoportal_url:
-                existing.geoportal_url = listing.geoportal_url
-            if listing.mpzp_zone:
-                existing.mpzp_zone = listing.mpzp_zone
-            if listing.mpzp_status:
-                existing.mpzp_status = listing.mpzp_status
-            if listing.flood_risk_zone:
-                existing.flood_risk_zone = listing.flood_risk_zone
-            if listing.gesut_networks:
-                existing.gesut_networks_data = listing.gesut_networks
-            apply_if_present(existing, listing, SPATIAL_FIELDS)
-
-            # Update qualification
-            existing.is_qualified = filter_result.is_qualified
-            existing.qualification_status = filter_result.status.value
-            existing.qualification_score = filter_result.score
-            existing.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
-            existing.pros = filter_result.pros
-            existing.cons = filter_result.cons
-            _apply_ai_fields(existing, filter_result)
-            _apply_llm_cache_fields(existing, llm_cache)
-            if listing.physical_fingerprint:
-                existing.physical_fingerprint = listing.physical_fingerprint
-            if listing.relist_count > 0:
-                existing.relist_count = max(existing.relist_count or 0, listing.relist_count)
-            existing.first_seen_at = listing.first_seen_at or existing.first_seen_at or existing.created_at
-            existing.initial_price = existing.initial_price or listing.initial_price or existing.price
-            existing.listing_status = "ACTIVE"
-            existing.updated_at = datetime.now(UTC)
-            existing.last_scraped_at = datetime.now(UTC)
+            _populate_listing_model(
+                existing,
+                listing,
+                filter_result,
+                is_exact_coords=is_exact_coords,
+                llm_cache=llm_cache,
+                is_new=False,
+            )
 
             if price_changed:
                 logger.info(
@@ -282,100 +320,17 @@ class ListingRepository:
             portal_id=listing.id,
             url=listing.url,
             property_fingerprint=listing.property_fingerprint or "unknown",
-            physical_fingerprint=listing.physical_fingerprint,
-            listing_status=listing.listing_status or "ACTIVE",
-            first_seen_at=listing.first_seen_at or datetime.now(UTC),
-            initial_price=listing.initial_price or listing.price,
-            relist_count=listing.relist_count or 0,
-            title=listing.title,
-            price=listing.price,
-            price_per_m2=listing.price_per_m2,
-            area_home=listing.area_home,
-            area_plot=listing.area_plot,
-            category=_val(listing.category),
-            rooms=listing.rooms,
-            floor=listing.floor,
-            floors_in_building=listing.floors_in_building,
-            is_private_owner=listing.is_private_owner,
-            profile_id=listing.profile_id,
-            profile_name=listing.profile_name,
-            building_type=listing.building_type.value,
-            segment_subtype=listing.segment_subtype.value,
-            location_raw=listing.location_raw,
-            street=listing.street,
-            district=listing.district,
-            city=listing.city,
-            latitude=lat,
-            longitude=lon,
-            is_exact_coords=is_exact_coords,
-            parcel_id=listing.parcel_id,
-            cadastral_area=listing.cadastral_area,
-            geoportal_url=listing.geoportal_url,
-            mpzp_zone=listing.mpzp_zone,
-            mpzp_status=listing.mpzp_status,
-            flood_risk_zone=listing.flood_risk_zone,
-            landslide_risk=listing.landslide_risk,
-            egib_building_status=listing.egib_building_status,
-            egib_soil_class=listing.egib_soil_class,
-            noise_level_db=listing.noise_level_db,
-            noise_zone=listing.noise_zone,
-            nature_protected_zone=listing.nature_protected_zone,
-            monument_zone=listing.monument_zone,
-            cemetery_buffer_zone=listing.cemetery_buffer_zone,
-            broadband_status=listing.broadband_status,
-            broadband_details=listing.broadband_details,
-            parcel_front_width_m=listing.parcel_front_width_m,
-            parcel_length_m=listing.parcel_length_m,
-            parcel_aspect_ratio=listing.parcel_aspect_ratio,
-            parcel_shape_type=listing.parcel_shape_type,
-            terrain_slope_pct=listing.terrain_slope_pct,
-            terrain_aspect=listing.terrain_aspect,
-            walkability_pka_dist_m=listing.walkability_pka_dist_m,
-            walkability_pka_name=listing.walkability_pka_name,
-            power_lines_risk=listing.power_lines_risk,
-            solar_hours_per_year=listing.solar_hours_per_year,
-            solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
-            geology_formation=listing.geology_formation,
-            geology_risk_note=listing.geology_risk_note,
-            air_aqi=listing.air_aqi,
-            air_aqi_label=listing.air_aqi_label,
-            air_pm25_heating_avg=listing.air_pm25_heating_avg,
-            air_pm25_summer_avg=listing.air_pm25_summer_avg,
-            air_smog_days=listing.air_smog_days,
-            air_gios_station=listing.air_gios_station,
-            air_gios_dist_km=listing.air_gios_dist_km,
-            air_gios_index=listing.air_gios_index,
-            air_smog_risk=listing.air_smog_risk,
-            access_road_type=_val(listing.access_road_type),
-            market=_val(listing.market),
-            finish_condition=_val(listing.finish_condition),
-            has_visualisations=bool(listing.has_visualisations),
-            sewerage=_val(listing.sewerage),
-            heating=_val(listing.heating),
-            has_fiber=bool(listing.has_fiber),
-            year_built=listing.year_built,
-            raw_description=listing.raw_description,
-            main_image_url=listing.main_image_url,
-            is_qualified=filter_result.is_qualified,
-            qualification_status=filter_result.status.value,
-            qualification_score=filter_result.score,
             created_at=listing.created_at,
             updated_at=listing.created_at,
-            last_scraped_at=datetime.now(UTC),
         )
-        if listing.poi_counts:
-            new_model.poi_counts = listing.poi_counts
-        if listing.nearest_poi:
-            new_model.nearest_poi = listing.nearest_poi
-        new_model.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
-        new_model.pros = filter_result.pros
-        new_model.cons = filter_result.cons
-        _apply_ai_fields(new_model, filter_result)
-        _apply_llm_cache_fields(new_model, llm_cache)
-        if listing.gallery_images:
-            new_model.gallery_images = listing.gallery_images
-        if listing.gesut_networks:
-            new_model.gesut_networks_data = listing.gesut_networks
+        _populate_listing_model(
+            new_model,
+            listing,
+            filter_result,
+            is_exact_coords=is_exact_coords,
+            llm_cache=llm_cache,
+            is_new=True,
+        )
 
         self.session.add(new_model)
         try:
@@ -391,21 +346,14 @@ class ListingRepository:
             if existing is None:
                 raise  # unexpected — re-raise so the caller sees it
 
-            existing.title = new_model.title
-            existing.price = new_model.price
-            existing.price_per_m2 = new_model.price_per_m2
-            existing.area_home = new_model.area_home
-            existing.area_plot = new_model.area_plot
-            existing.is_qualified = new_model.is_qualified
-            existing.qualification_status = new_model.qualification_status
-            existing.qualification_score = new_model.qualification_score
-            existing.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
-            existing.pros = filter_result.pros
-            existing.cons = filter_result.cons
-            _apply_ai_fields(existing, filter_result)
-            _apply_llm_cache_fields(existing, llm_cache)
-            existing.updated_at = datetime.now(UTC)
-            existing.last_scraped_at = datetime.now(UTC)
+            _populate_listing_model(
+                existing,
+                listing,
+                filter_result,
+                is_exact_coords=is_exact_coords,
+                llm_cache=llm_cache,
+                is_new=False,
+            )
             await self.session.flush()
             return existing, False, False
 

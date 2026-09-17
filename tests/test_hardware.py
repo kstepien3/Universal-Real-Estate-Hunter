@@ -5,8 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from src.filters.hardware import SUGGESTED_OLLAMA_MODELS
-from src.filters.llm_analyzer import LLMAnalyzer
+from src.filters.llm_analyzer import SUGGESTED_OLLAMA_MODELS, LLMAnalyzer
 from src.services.config_manager import SearchConfig, config_manager
 
 

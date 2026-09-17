@@ -11,9 +11,9 @@ from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.listing import (
     AIR_FIELDS,
     GEO_FIELDS,
-    SPATIAL_FIELDS,
     ListingSchema,
     apply_if_present,
+    copy_spatial_fields,
     restore_cached_details,
 )
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
@@ -323,22 +323,19 @@ class ScraperPipeline:
             if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
                 filter_result.worth_interest = existing_model.worth_interest
 
-        # Ensure spatial fields and scoring are applied if not already on the result
-        if filter_result.is_qualified and not filter_result.mpzp_zone and listing.mpzp_zone:
-            res_spatial = self.engine.apply_spatial_findings(
+        # Apply spatial findings if not already reflected on qualified result
+        if filter_result.is_qualified and not filter_result.mpzp_zone and (geo_audit or listing.mpzp_zone):
+            new_score, new_pros, new_cons = self.engine.apply_spatial_findings(
                 listing=listing,
                 score=filter_result.score,
                 pros=filter_result.pros,
                 cons=filter_result.cons,
                 geo_audit=geo_audit,
             )
-            if asyncio.iscoroutine(res_spatial):
-                res_spatial = await res_spatial
-            new_score, new_pros, new_cons = res_spatial
             filter_result.score = min(100.0, max(0.0, new_score))
             filter_result.pros = new_pros
             filter_result.cons = new_cons
-            apply_if_present(filter_result, listing, SPATIAL_FIELDS)
+            copy_spatial_fields(filter_result, listing)
             filter_result.mpzp_zone = listing.mpzp_zone
             filter_result.flood_risk_zone = listing.flood_risk_zone
 
@@ -946,73 +943,15 @@ class ScraperPipeline:
                     if item.air_smog_risk is None:
                         item.air_smog_risk = "NIEZNANE"
 
-                item_pros = list(item.pros or [])
-                item_cons = list(item.cons or [])
-                score_mod = 0.0
-
-                if item.broadband_status == "ŚWIATŁOWÓD_AKTYWNY" and not any(
-                    "światłowód" in p.lower() for p in item_pros
-                ):
-                    item_pros.append("🌐 Światłowód aktywny FTTH (potwierdzony w SIDUSIS internet.gov.pl)")
-                    score_mod += 5.0
-                elif item.broadband_status in ("BRAK", "BRAK_ZASIĘGU") and not any(
-                    "brak stacjonarnego internetu" in c.lower() for c in item_cons
-                ):
-                    item_cons.append(
-                        "⚠️ Brak stacjonarnego internetu szerokopasmowego (SIDUSIS): Konieczność łączności LTE/5G lub Starlink"
-                    )
-                    score_mod -= 5.0
-
-                if item.parcel_front_width_m is not None:
-                    if item.parcel_front_width_m < 16.0 and not any("wąski front" in c.lower() for c in item_cons):
-                        item_cons.append(
-                            f"📐 Wąski front działki ({item.parcel_front_width_m:.1f} m < 16 m): Restrykcje odległościowe Prawa Budowlanego"
-                        )
-                        score_mod -= 15.0
-                    elif (
-                        item.parcel_shape_type == "REGULARNY"
-                        and item.parcel_front_width_m >= 18.0
-                        and not any("foremna działka" in p.lower() for p in item_pros)
-                    ):
-                        item_pros.append(f"📐 Foremna działka: szerokość frontu {item.parcel_front_width_m:.0f} m")
-
-                if item.terrain_slope_pct is not None:
-                    if item.terrain_slope_pct > 8.0 and not any("strome nachylenie" in c.lower() for c in item_cons):
-                        item_cons.append(
-                            f"⛰️ Strome nachylenie terenu (spadek {item.terrain_slope_pct:.1f}%): Ryzyko murów oporowych i spływu wód"
-                        )
-                        score_mod -= 15.0
-                    elif (
-                        item.terrain_aspect in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI")
-                        and item.terrain_slope_pct >= 2.0
-                        and not any("południowa ekspozycja" in p.lower() for p in item_pros)
-                    ):
-                        item_pros.append(
-                            f"☀️ Południowa ekspozycja stoku (spadek {item.terrain_slope_pct:.1f}%) — doskonałe nasłonecznienie pod fotowoltaikę"
-                        )
-
-                if (
-                    item.power_lines_risk
-                    and any(k in item.power_lines_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN"))
-                    and not any("wysokiego napięcia" in c.lower() for c in item_cons)
-                ):
-                    item_cons.append(f"⚡ Sąsiedztwo napowietrznej linii wysokiego napięcia ({item.power_lines_risk})")
-                    score_mod -= 20.0
-
-                if (
-                    item.walkability_pka_dist_m is not None
-                    and item.walkability_pka_dist_m <= 1500
-                    and not any("stacja kolejowa pka" in p.lower() for p in item_pros)
-                ):
-                    item_pros.append(
-                        f"🚆 Stacja kolejowa PKA ({item.walkability_pka_name or 'PKA'}: {item.walkability_pka_dist_m} m)"
-                    )
-                    score_mod += 5.0
-
-                item.pros = item_pros
-                item.cons = item_cons
-                if score_mod != 0.0 and item.qualification_score is not None:
-                    item.qualification_score = max(0.0, min(150.0, item.qualification_score + score_mod))
+                score, item.pros, item.cons = self.engine.apply_spatial_findings(
+                    listing=item,
+                    score=float(item.qualification_score or 50.0),
+                    pros=list(item.pros or []),
+                    cons=list(item.cons or []),
+                    geo_audit=geo_audit,
+                )
+                if item.qualification_score is not None:
+                    item.qualification_score = min(100.0, max(0.0, score))
 
                 item.updated_at = datetime.now(UTC)
                 updated_count += 1

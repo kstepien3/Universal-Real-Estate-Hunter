@@ -21,6 +21,59 @@ _PROMPT_TEMPLATE_CACHE: str | None = None
 # Circuit-breaker: skip providers that recently failed with quota/429 (per process).
 _provider_cooldown_until: dict[str, float] = {}
 
+SUGGESTED_OLLAMA_MODELS: list[dict[str, Any]] = [
+    {
+        "id": "qwen2.5:7b",
+        "name": "Qwen 2.5 7B",
+        "tag": "qwen2.5:7b",
+        "size_gb": 4.7,
+        "min_ram_gb": 8,
+        "min_vram_gb": 6,
+        "badge": "Zrównoważony",
+        "description": "Optymalny model ogólnego przeznaczenia z wysoką wiernością schematów JSON.",
+    },
+    {
+        "id": "bielik:11b-v2.3-instruct",
+        "name": "Bielik 11B v2.3 Instruct",
+        "tag": "bielik:11b-v2.3-instruct",
+        "size_gb": 6.5,
+        "min_ram_gb": 16,
+        "min_vram_gb": 10,
+        "badge": "Polski ekspert",
+        "description": "Polski model wyspecjalizowany w terminologii budowlanej i prawnej.",
+    },
+    {
+        "id": "qwen2.5:14b",
+        "name": "Qwen 2.5 14B",
+        "tag": "qwen2.5:14b",
+        "size_gb": 9.0,
+        "min_ram_gb": 24,
+        "min_vram_gb": 12,
+        "badge": "Wysoka precyzja",
+        "description": "Maksymalna dokładność audytu technicznego. Wymaga dedykowanego GPU lub Apple Silicon.",
+    },
+    {
+        "id": "llama3.2:3b",
+        "name": "Llama 3.2 3B",
+        "tag": "llama3.2:3b",
+        "size_gb": 2.0,
+        "min_ram_gb": 6,
+        "min_vram_gb": 4,
+        "badge": "Lekki (CPU)",
+        "description": "Szybki i oszczędny model dla słabszych jednostek CPU bez GPU.",
+    },
+    {
+        "id": "llama3.1:8b",
+        "name": "Llama 3.1 8B",
+        "tag": "llama3.1:8b",
+        "size_gb": 4.9,
+        "min_ram_gb": 10,
+        "min_vram_gb": 8,
+        "badge": "Uniwersalny",
+        "description": "Stabilny model z uniwersalną obsługą zapytań i formatowania JSON.",
+    },
+]
+
 _llm_throttle_lock = asyncio.Lock()
 _llm_call_times: deque[float] = deque()
 
@@ -117,6 +170,46 @@ class LLMAnalyzer:
     hidden costs, legal risks, portal-vs-text discrepancies, buyer summary, interest
     verdict, questions for the agent, and contact extraction.
     """
+
+    @classmethod
+    def from_config(cls, cfg: Any = None, **overrides: Any) -> "LLMAnalyzer":
+        if cfg is None:
+            try:
+                from src.services.config_manager import config_manager
+
+                cfg = config_manager.get_config()
+            except Exception:
+                cfg = None
+
+        params: dict[str, Any] = {}
+        if cfg:
+            data = cfg.model_dump() if hasattr(cfg, "model_dump") else getattr(cfg, "__dict__", {})
+            if "llm_analysis_enabled" in data:
+                params["enabled"] = data["llm_analysis_enabled"]
+            supported_fields = (
+                "ollama_model",
+                "ollama_base_url",
+                "ollama_timeout_seconds",
+                "openrouter_model",
+                "llm_provider",
+                "ollama_temperature",
+                "ollama_num_ctx",
+                "local_llm_base_url",
+                "local_llm_model",
+                "local_llm_api_key",
+                "local_llm_temperature",
+                "local_llm_timeout_seconds",
+                "local_llm_preset",
+                "local_llm_num_ctx",
+                "cloud_llm_timeout_seconds",
+            )
+            for key in supported_fields:
+                val = data.get(key)
+                if val is not None:
+                    params[key] = val
+
+        params.update({k: v for k, v in overrides.items() if v is not None})
+        return cls(**params)
 
     def __init__(
         self,
@@ -691,8 +784,6 @@ class LLMAnalyzer:
                 if providers_map[p_id]["status"] == "ok":
                     active_provider = providers_map[p_id]
                     break
-
-        from src.filters.hardware import SUGGESTED_OLLAMA_MODELS
 
         return {
             "enabled": bool(self.enabled),
