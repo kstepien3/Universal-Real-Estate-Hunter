@@ -1726,7 +1726,7 @@ class LiveDashboardServer:
             logger.info("[LiveDashboard] Background scrape task cancelled.")
             global_tracker.cancel_session()
         except Exception as e:
-            logger.error(f"[LiveDashboard] Background scrape error: {e}", exc_info=True)
+            logger.error("[LiveDashboard] Background scrape error: {}", e, exc_info=True)
             global_tracker.add_log(f"Błąd krytyczny scrapingu: {e}", level="error")
             global_tracker.complete_session({"error": str(e)})
         finally:

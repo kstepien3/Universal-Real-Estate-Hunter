@@ -489,6 +489,8 @@ async def test_migrate_database_columns_sqlite(tmp_path):
         assert "desc_hash" in cols
         assert "profile_id" in cols
         assert "user_status" in cols
+        assert "physical_fingerprint" in cols
+        assert "property_fingerprint" not in cols
 
     await engine.dispose()
 
@@ -510,8 +512,8 @@ async def test_migrate_database_columns_postgres_simulation():
         executed_sqls.append(sql_str)
         mock_res = MagicMock()
         if "information_schema.columns" in sql_str:
-            # Simulate an existing table with only legacy columns (missing air_aqi)
-            mock_res.fetchall.return_value = [("id",), ("title",), ("price",)]
+            # Simulate an existing table with legacy property_fingerprint column
+            mock_res.fetchall.return_value = [("id",), ("title",), ("price",), ("property_fingerprint",)]
         else:
             mock_res.fetchall.return_value = []
         return mock_res
@@ -528,6 +530,12 @@ async def test_migrate_database_columns_postgres_simulation():
         s for s in executed_sqls if "ALTER TABLE listings ADD COLUMN IF NOT EXISTS air_aqi INTEGER" in s
     ]
     assert len(air_aqi_statements) == 1
+
+    # Verify obsolete property_fingerprint was dropped
+    drop_statements = [
+        s for s in executed_sqls if "ALTER TABLE listings DROP COLUMN IF EXISTS property_fingerprint" in s
+    ]
+    assert len(drop_statements) == 1
 
 
 def test_resolve_database_url_auto_detect(monkeypatch):

@@ -408,6 +408,35 @@ async def _migrate_database_columns(conn) -> None:
                         sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
                     existing_cols.add(col_name_lower)
 
+            if "property_fingerprint" in existing_cols:
+                try:
+                    if "physical_fingerprint" in existing_cols:
+                        sync_conn.execute(
+                            text(
+                                "UPDATE listings SET physical_fingerprint = property_fingerprint "
+                                "WHERE physical_fingerprint IS NULL AND property_fingerprint IS NOT NULL"
+                            )
+                        )
+                except Exception as e:
+                    logger.debug(f"[Database] Copy property_fingerprint note: {e}")
+
+                try:
+                    if is_sqlite:
+                        sync_conn.execute(text("ALTER TABLE listings DROP COLUMN property_fingerprint"))
+                    else:
+                        sync_conn.execute(text("ALTER TABLE listings DROP COLUMN IF EXISTS property_fingerprint"))
+                    existing_cols.remove("property_fingerprint")
+                    logger.info("[Database] Obsolete column 'property_fingerprint' successfully removed from schema.")
+                except Exception as e:
+                    logger.debug(f"[Database] Drop property_fingerprint note: {e}")
+                    if not is_sqlite:
+                        try:
+                            sync_conn.execute(
+                                text("ALTER TABLE listings ALTER COLUMN property_fingerprint DROP NOT NULL")
+                            )
+                        except Exception:
+                            pass
+
             if "profile_id" in existing_cols:
                 sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
 

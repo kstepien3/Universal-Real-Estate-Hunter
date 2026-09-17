@@ -316,16 +316,16 @@ class ListingRepository:
         self.session.add(new_model)
         try:
             await self.session.flush()
-        except sa_exc.IntegrityError:
-            # Another concurrent task already inserted this URL — roll back the
-            # failed INSERT and fall through to an UPDATE on the winner row.
+        except sa_exc.IntegrityError as err:
+            # Another concurrent task might have already inserted this URL — roll back the
+            # failed INSERT and check if the winner row exists to fall through to an UPDATE.
             await self.session.rollback()
-            logger.warning(f"Race condition on INSERT for URL {listing.url!r} — retrying as UPDATE")
             existing = await self.get_by_url(listing.url)
             if existing is None:
                 existing = await self.get_by_portal_id(listing.portal, listing.id)
             if existing is None:
-                raise  # unexpected — re-raise so the caller sees it
+                raise err  # Non-race integrity error (e.g. constraint violation) — re-raise
+            logger.warning(f"Race condition on INSERT for URL {listing.url!r} — retrying as UPDATE (ID #{existing.id})")
 
             _populate_listing_model(
                 existing,

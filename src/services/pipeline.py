@@ -680,7 +680,13 @@ class ScraperPipeline:
                 logger.info(f"[{scraper.name} - {prof_name}] Scraped {len(listings)} listings.")
                 return prof, prof_name, scraper.name, listings, None
             except Exception as e:
-                logger.error(f"[Pipeline] Error running {scraper.name} for {prof_name}: {e}", exc_info=True)
+                logger.error(
+                    "[Pipeline] Error running {} for {}: {}",
+                    scraper.name,
+                    prof_name,
+                    e,
+                    exc_info=True,
+                )
                 global_tracker.add_log(f"[{scraper.name} - {prof_name}] Błąd: {e}", level="error")
                 return prof, prof_name, scraper.name, [], e
             finally:
