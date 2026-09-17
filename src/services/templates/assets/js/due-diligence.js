@@ -430,19 +430,65 @@ function renderLandAuditHtml(item) {
     // 7. Vision AI photo audit (Living Quarters)
     let visionHtml = '';
     if (item.vision_finish_condition) {
-        const vRow = item.vision_is_render === true ? 'row-warn' : 'row-ok';
-        const vBadge = item.vision_is_render === true ? 'audit-verdict-warning' : 'audit-verdict-success';
-        const vVerdict = item.vision_is_render === true ? 'WIZUALIZACJE 3D' : item.vision_finish_condition;
+        const isUnknown = item.vision_finish_condition === 'NIEZNANY';
+        const vRow = item.vision_is_render === true ? 'row-warn' : (isUnknown ? 'row-neutral' : 'row-ok');
+        const vBadge = item.vision_is_render === true ? 'audit-verdict-warning' : (isUnknown ? 'audit-verdict-muted' : 'audit-verdict-success');
+        const formatFinishConditionLabel = (val) => {
+            if (!val) return '';
+            const norm = String(val).trim().toUpperCase();
+            const map = {
+                'DO_ZAMIESZKANIA': 'Do zamieszkania',
+                'DO_WYKONCZENIA': 'Do wykończenia',
+                'DEWELOPERSKI': 'Stan deweloperski',
+                'SUROWY': 'Stan surowy',
+                'DO_REMONTU': 'Do remontu',
+                'NIEZNANY': 'Nieznany'
+            };
+            if (map[norm]) return map[norm];
+            return norm.replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase());
+        };
+        const vConditionLabel = formatFinishConditionLabel(item.vision_finish_condition);
+        const vVerdict = item.vision_is_render === true ? 'WIZUALIZACJE 3D' : vConditionLabel;
         const fp = item.vision_floorplan_details || {};
-        const defects = (item.vision_defects || []).map(d => `<tr><th>Wada</th><td class="value">${escapeHtml(d)}</td></tr>`).join('');
+        const formatVisionDefect = (d) => {
+            if (!d) return '';
+            if (typeof d === 'string') return d;
+            if (typeof d === 'object') {
+                const desc = d.description || d.defect || d.defect_type || d.wada || d.note || d.name || '';
+                const photo = (d.photo_id !== undefined && d.photo_id !== null)
+                    ? d.photo_id
+                    : ((d.photo_index !== undefined && d.photo_index !== null)
+                        ? d.photo_index
+                        : ((d.image_index !== undefined && d.image_index !== null)
+                            ? d.image_index
+                            : ((d.image_id !== undefined && d.image_id !== null) ? d.image_id : null)));
+                const prefix = photo !== null ? `[Zdjęcie ${photo}] ` : '';
+                return (prefix + (desc || Object.values(d).filter(v => typeof v === 'string' || typeof v === 'number').join(' — '))).trim();
+            }
+            return String(d);
+        };
+        const defects = (item.vision_defects || []).map(d => `<tr><th>Wada</th><td class="value">${escapeHtml(formatVisionDefect(d))}</td></tr>`).join('');
+        const summaryHtml = item.vision_summary ? `
+            <div class="audit-summary-note" style="margin: 8px 0 12px 0; padding: 10px 14px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--accent, #3b82f6); border-radius: 4px; font-size: 13px; line-height: 1.5; color: var(--text, #e2e8f0);">
+                <span style="font-size: 14px; margin-right: 4px;">💬</span> <em>${escapeHtml(item.vision_summary)}</em>
+            </div>
+        ` : '';
+        const discrepancyRow = item.vision_discrepancy_note ? `
+            <tr class="row-warn">
+                <th>Rozbieżność z opisem</th>
+                <td class="value"><span style="color: var(--yellow, #f59e0b); font-weight: 600;">⚠️ ${escapeHtml(item.vision_discrepancy_note)}</span></td>
+            </tr>
+        ` : '';
         visionHtml = `
             <div class="audit-block">
                 <div class="audit-block-head">
                     <div class="audit-block-title">Audyt zdjęć (Vision AI)</div>
                     <span class="audit-verdict-badge ${vBadge}">${escapeHtml(vVerdict)}</span>
                 </div>
+                ${summaryHtml}
                 <table class="dd-table">
-                    <tr class="${vRow}"><th>Stan ze zdjęć</th><td class="value">${escapeHtml(item.vision_finish_condition)}${item.vision_is_render === true ? ' — zdjęcia to rendery, stan faktyczny do weryfikacji na żywo' : ''}</td></tr>
+                    <tr class="${vRow}"><th>Stan ze zdjęć</th><td class="value">${escapeHtml(vConditionLabel)}${item.vision_is_render === true ? ' — zdjęcia to rendery, stan faktyczny do weryfikacji na żywo' : ''}</td></tr>
+                    ${discrepancyRow}
                     ${fp.orientation ? `<tr><th>Rzut: orientacja</th><td class="value">${escapeHtml(fp.orientation)}</td></tr>` : ''}
                     ${fp.usability_score ? `<tr><th>Rzut: ustawność</th><td class="value"><span class="num">${fp.usability_score}/10</span>${fp.room_layout_notes ? ` — ${escapeHtml(fp.room_layout_notes)}` : ''}</td></tr>` : ''}
                     ${defects}

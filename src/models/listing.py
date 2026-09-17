@@ -68,6 +68,8 @@ VISION_FIELDS: tuple[str, ...] = (
     "vision_finish_condition",
     "vision_floorplan_details",
     "vision_defects",
+    "vision_summary",
+    "vision_discrepancy_note",
 )
 
 COMMUTE_FIELDS: tuple[str, ...] = (
@@ -255,6 +257,8 @@ class FilterResult(BaseModel):
     vision_finish_condition: str | None = None
     vision_floorplan_details: dict[str, Any] | None = None
     vision_defects: list[str] | None = None
+    vision_summary: str | None = None
+    vision_discrepancy_note: str | None = None
     # Extended Intelligence: Commute & Pedestrian Safety
     commute_drive_min: int | None = None
     commute_drive_km: float | None = None
@@ -378,6 +382,8 @@ class ListingSchema(BaseModel):
     vision_finish_condition: str | None = None
     vision_floorplan_details: dict[str, Any] | None = None
     vision_defects: list[str] | None = None
+    vision_summary: str | None = None
+    vision_discrepancy_note: str | None = None
     # Extended Intelligence: Commute & Pedestrian Safety
     commute_drive_min: int | None = None
     commute_drive_km: float | None = None

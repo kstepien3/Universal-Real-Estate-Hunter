@@ -578,3 +578,34 @@ def test_resolve_database_url_auto_detect(monkeypatch):
     upgraded = resolve_database_url()
     assert "postgresql" in upgraded
     assert "estate_hunter" in upgraded
+
+
+def test_listing_model_vision_defects_property_normalizes_dicts() -> None:
+    """ListingModel.vision_defects getter and setter must normalize raw dicts to clean strings."""
+    from src.storage.models import ListingModel
+
+    listing = ListingModel()
+    listing._vision_defects = '[{"photo_id": 0, "description": "Słup wysokiego napięcia."}, "Zwykły tekst"]'
+    assert listing.vision_defects == [
+        "[Zdjęcie 0] Słup wysokiego napięcia.",
+        "Zwykły tekst",
+    ]
+
+    listing.vision_defects = [{"photo_index": 1, "defect": "Pęknięcie tynku"}]
+    assert listing.vision_defects == ["[Zdjęcie 1] Pęknięcie tynku"]
+    assert listing._vision_defects == '["[Zdjęcie 1] Pęknięcie tynku"]'
+
+
+def test_listing_model_vision_summary_and_discrepancy_fields() -> None:
+    """ListingModel must store and return vision_summary and vision_discrepancy_note."""
+    from src.storage.models import ListingModel
+
+    listing = ListingModel()
+    listing.vision_summary = "Wnętrze w pełni wykończone; do wykonania ogród i taras."
+    listing.vision_discrepancy_note = "W opisie deklarowano stan deweloperski, a zdjęcia pokazują pełne wykończenie."
+
+    assert listing.vision_summary == "Wnętrze w pełni wykończone; do wykonania ogród i taras."
+    assert (
+        listing.vision_discrepancy_note
+        == "W opisie deklarowano stan deweloperski, a zdjęcia pokazują pełne wykończenie."
+    )

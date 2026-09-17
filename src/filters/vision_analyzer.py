@@ -58,6 +58,20 @@ SUGGESTED_OLLAMA_VISION_MODELS: list[dict[str, Any]] = [
 
 DEFAULT_VISION_MODEL = "gpt-4o-mini"
 DEFAULT_VISION_OLLAMA_MODEL = "qwen2.5vl:7b"
+DEFAULT_VISION_OPENROUTER_MODEL = "google/gemini-2.5-flash"
+
+RETIRED_VISION_MODEL_ALIASES: dict[str, str] = {
+    "google/gemini-2.0-flash-001": "google/gemini-2.5-flash",
+    "google/gemini-2.0-flash": "google/gemini-2.5-flash",
+    "google/gemini-2.0-flash-lite": "google/gemini-2.5-flash-lite",
+    "gemini-2.0-flash-001": "google/gemini-2.5-flash",
+    "gemini-2.0-flash": "google/gemini-2.5-flash",
+    "gemini-2.5-flash": "google/gemini-2.5-flash",
+    "gemini 2.5 flash": "google/gemini-2.5-flash",
+    "gemini-2.5-flash-lite": "google/gemini-2.5-flash-lite:nitro",
+    "gemini 2.5 flash lite": "google/gemini-2.5-flash-lite:nitro",
+    "gemini-flash": "google/gemini-2.5-flash",
+}
 
 _VISION_MODEL_FAMILY_TOKENS: tuple[str, ...] = (
     "vision",
@@ -119,6 +133,66 @@ def _resolve_docker_base(base_url: str) -> str:
     return base
 
 
+def normalize_vision_defect(defect: Any) -> str:
+    """Converts a raw vision defect (string or dict) into a clean, human-readable Polish string."""
+    if not defect:
+        return ""
+    if isinstance(defect, str):
+        return defect.strip()
+    if isinstance(defect, dict):
+        desc = (
+            defect.get("description")
+            or defect.get("defect")
+            or defect.get("defect_type")
+            or defect.get("wada")
+            or defect.get("note")
+            or defect.get("name")
+            or defect.get("text")
+            or ""
+        )
+        photo = (
+            defect.get("photo_id")
+            if defect.get("photo_id") is not None
+            else (
+                defect.get("photo_index")
+                if defect.get("photo_index") is not None
+                else (defect.get("image_index") if defect.get("image_index") is not None else defect.get("image_id"))
+            )
+        )
+        prefix = f"[Zdjęcie {photo}] " if photo is not None else ""
+        if desc:
+            return f"{prefix}{desc}".strip()
+        val_strs = [str(v) for v in defect.values() if v is not None and not isinstance(v, (dict, list))]
+        return f"{prefix}{' — '.join(val_strs)}".strip() if val_strs else json.dumps(defect, ensure_ascii=False)
+    return str(defect).strip()
+
+
+def normalize_vision_defects(defects: Any) -> list[str]:
+    """Normalizes and deduplicates a collection of vision defects into clean strings."""
+    if not defects:
+        return []
+    if isinstance(defects, str):
+        try:
+            parsed = json.loads(defects)
+            if isinstance(parsed, list):
+                defects = parsed
+            else:
+                defects = [defects]
+        except Exception:
+            defects = [defects]
+    elif not isinstance(defects, (list, tuple, set)):
+        defects = [defects]
+
+    results: list[str] = []
+    seen: set[str] = set()
+    for d in defects:
+        norm = normalize_vision_defect(d)
+        if norm and norm not in seen:
+            seen.add(norm)
+            results.append(norm)
+    return results
+
+
 def resolve_vision_target(
     api_base: str | None = None,
     api_key: str | None = None,
@@ -154,14 +228,15 @@ def resolve_vision_target(
         pass
 
     # 1. Detect model intent (Ollama vs OpenRouter vs OpenAI)
-    req_model = model_name or cfg_model or getattr(settings, "VISION_MODEL", None)
+    raw_req = model_name or cfg_model or getattr(settings, "VISION_MODEL", None)
+    req_model = RETIRED_VISION_MODEL_ALIASES.get(str(raw_req).strip(), raw_req) if raw_req else None
     is_ollama_requested = False
     is_openrouter_requested = False
     is_openai_requested = False
 
     if req_model:
         req_norm = req_model.strip()
-        if "/" in req_norm:
+        if "/" in req_norm or "gemini" in req_norm.lower() or req_norm.lower().startswith("google/"):
             is_openrouter_requested = True
         elif req_norm.lower().startswith("gpt-"):
             is_openai_requested = True
@@ -171,6 +246,14 @@ def resolve_vision_target(
     # 2. Base URL resolution
     candidate_base = api_base or cfg_base or getattr(settings, "VISION_BASE_URL", None)
     is_openrouter_candidate = False
+
+    # Auto-route when candidate_base conflicts with requested model intent (e.g. cloud model with leftover Ollama base)
+    if is_openrouter_requested and is_local_vision_base(candidate_base):
+        candidate_base = "https://openrouter.ai/api/v1"
+        is_openrouter_candidate = True
+    elif is_ollama_requested and candidate_base and "openrouter.ai" in candidate_base:
+        candidate_base = cfg_local_base or getattr(settings, "OLLAMA_BASE_URL", None) or "http://localhost:11434"
+
     if not candidate_base:
         if is_ollama_requested:
             candidate_base = cfg_local_base or getattr(settings, "OLLAMA_BASE_URL", None) or "http://localhost:11434"
@@ -215,11 +298,17 @@ def resolve_vision_target(
     if is_local_base:
         default_model = DEFAULT_VISION_OLLAMA_MODEL
     elif is_openrouter_base:
-        default_model = "google/gemini-2.0-flash-001"
+        # If user configured a vision-capable OpenRouter model, inherit it; otherwise use fast default
+        cfg_or_model = getattr(cfg, "openrouter_model", None) or getattr(settings, "OPENROUTER_MODEL", None)
+        if cfg_or_model and any(tok in str(cfg_or_model).lower() for tok in ("gemini", "flash", "vision", "vl", "4o")):
+            default_model = str(cfg_or_model).strip()
+        else:
+            default_model = DEFAULT_VISION_OPENROUTER_MODEL
     else:
         default_model = getattr(settings, "OPENAI_MODEL", None) or DEFAULT_VISION_MODEL
 
-    model = req_model or default_model
+    raw_model = req_model or default_model
+    model = RETIRED_VISION_MODEL_ALIASES.get(raw_model, raw_model)
     return target_base, target_key, model
 
 
@@ -231,19 +320,22 @@ def declared_finish_label(source: Any) -> str | None:
     return str(getattr(finish_val, "value", finish_val) or "") or None
 
 
-VISION_AUDIT_PROMPT = """Jesteś rzeczoznawcą budowlanym. Przeprowadź forensic audyt załączonych zdjęć oferty nieruchomości.
+VISION_AUDIT_PROMPT = """Jesteś rzeczoznawcą budowlanym i audytorem due diligence nieruchomości.
+Przeprowadź forensic audyt załączonych zdjęć, ustalając stan faktyczny (Ground Truth) oraz wady wpływające na wycenę, CAPEX i bezpieczeństwo.
 
 Kroki (wykonaj wszystkie, po kolei):
-1. Render vs fotografia: sklasyfikuj każde zdjęcie jako render 3D/CAD albo fotografię fizycznego budynku. Kryterium ukończenia: is_render opisuje cały zestaw, a render_confidence (0-1) odzwierciedla pewność tej klasyfikacji.
-2. Stan wykończenia: przypisz jeden visual_finish_condition ze słownika DO_ZAMIESZKANIA | DO_WYKONCZENIA | DEWELOPERSKI | SUROWY | DO_REMONTU | NIEZNANY, stosując poprzeczkę Living Quarters poniżej. Kryterium ukończenia: etykieta odpowiada najsłabszemu widocznemu pomieszczeniu mieszkalnemu ze wszystkich zdjęć.
-3. Rzut: ustaw has_floorplan. Gdy rzut występuje, wypełnij orientation, usability_score (1-10) i room_layout_notes. Kryterium ukończenia: każdy widoczny rzut ma odzwierciedlenie w floorplan_details albo has_floorplan to false.
-4. Wady: wypisz każdą widoczną wadę fizyczną z każdego zdjęcia (wilgoć, pęknięcia, brak balustrad, wystające przewody, prowizoryczne schody, słupy wysokiego napięcia za oknem). Kryterium ukończenia: każde zdjęcie wniosło zero albo więcej wpisów do defects.
-
-Poprzeczka Living Quarters (definicja DO_ZAMIESZKANIA):
-1. Kuchnia: zabudowa kuchenna, zlew, płyta/kuchenka, lodówka lub gotowe przyłącza ze sprzętem.
-2. Łazienki: wykończone ściany, zamontowana armatura (miska WC, umywalka, prysznic/wanna).
-3. Podłogi i ściany: ułożone podłogi (panele, deski, parkiet, płytki), pomalowane ściany, sprawne ogrzewanie.
-Zachowaj DO_ZAMIESZKANIA, gdy wnętrze mieszkalne spełnia powyższe trzy punkty; drobne prace zewnętrzne (brak kostki, taras do wykończenia, nieurządzony ogród, poddasze do adaptacji) odnotuj w summary. Gdy opis ogłoszenia podano powyżej, a zdjęcia mu przeczą, wyjaśnij różnicę w discrepancy_note.
+1. Render vs fotografia: Sklasyfikuj zestaw zdjęć. Czy to rendery 3D/CAD/wizualizacje, czy fotografie fizycznego budynku? Kryterium ukończenia: is_render (true/false) oraz render_confidence (0.0-1.0).
+2. Stan wykończenia (Living Quarters): Przypisz jeden visual_finish_condition ze słownika: DO_ZAMIESZKANIA | DO_WYKONCZENIA | DEWELOPERSKI | SUROWY | DO_REMONTU | NIEZNANY.
+   - Poprzeczka DO_ZAMIESZKANIA wymaga: gotowej kuchni (meble, zlew, płyta), wykończonej łazienki z armaturą, ułożonych podłóg i pomalowanych ścian.
+   - Zasada elementów zewnętrznych: Niewykończony taras, brak kostki brukowej, ogród do zagospodarowania czy poddasze do adaptacji NIE degradują stanu wnętrza — pozostaw DO_ZAMIESZKANIA, a prace zewnętrzne opisz w summary.
+   - Kryterium ukończenia: Etykieta odpowiada najsłabszemu widocznemu pomieszczeniu mieszkalnemu.
+3. Rzut architektoniczny: Ustaw has_floorplan (true/false). Gdy widoczny jest rzut, podaj orientation, usability_score (1-10) i room_layout_notes.
+4. Wady kosztotwórcze i uciążliwości (defects): Wypisz wyłącznie twarde wady techniczne generujące koszty naprawy/wykończenia (CAPEX), wady bezpieczeństwa lub istotne uciążliwości działki.
+   - Zakres wad: Pęknięcia konstrukcyjne ścian/stropów, zacieki, wilgoć, grzyb, brak elewacji/ocieplenia, uszkodzenia dachu, brak balustrad na wysokości, odsłonięte przewody instalacyjne pod napięciem, prowizoryczne schody, słupy/linie napowietrzne wysokiego napięcia tuż przy budynku, brak utwardzonego zjazdu, hałdy odpadów/gruzu na działce.
+   - Antyszum (co NIE jest wadą): Puste pokoje, brak mebli ruchomych, niepodłączone AGD, brak powieszonego telewizora, puste gniazdka ścienne czy brak żyrandoli to ZWYCZAJNY STAN NIERUCHOMOŚCI DO SPRZEDAŻY — NIGDY nie zgłaszaj ich jako wady!
+   - Konsolidacja: Zgrupuj powtarzające się ujęcia tej samej wady w jeden zwięzły wpis z odnośnikiem do zdjęć (np. "[Zdjęcia 0, 2] Słup linii napowietrznej w granicy działki").
+   - Format: Tablica defects MUSI zawierać wyłącznie zwięzłe ciągi tekstowe (stringi), NIGDY obiekty. Przy braku wad zwróć pustą tablicę [].
+5. Sprzeczność z opisem (discrepancy_note): Jeżeli w opisie deklarowano stan wyższy niż widać na zdjęciach (np. w opisie 'stan idealny pod klucz', a na zdjęciach brak łazienki lub stan surowy), opisz sprzeczność wprost.
 
 Zwróć poprawny obiekt JSON dokładnie o tym schemacie, bez otaczającego tekstu:
 {
@@ -256,7 +348,9 @@ Zwróć poprawny obiekt JSON dokładnie o tym schemacie, bez otaczającego tekst
     "usability_score": 8,
     "room_layout_notes": "Brak pokoi przechodnich, ustawny układ"
   },
-  "defects": [],
+  "defects": [
+    "[Zdjęcia 0, 2] Słup linii elektroenergetycznej w bezpośrednim sąsiedztwie budynku"
+  ],
   "discrepancy_note": null,
   "summary": "Wnętrze w pełni wykończone i umeblowane, gotowe do natychmiastowego zamieszkania."
 }
@@ -278,7 +372,7 @@ class VisionAnalyzer:
         "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     }
 
-    def __init__(self, timeout: float = 25.0):
+    def __init__(self, timeout: float = 60.0):
         self.timeout = timeout
 
     async def fetch_image_as_data_uri(
@@ -350,20 +444,71 @@ class VisionAnalyzer:
                 )
 
         _, _, model = resolve_vision_target(model_name=model_name)
-        return {
+        payload: dict[str, Any] = {
             "model": model,
             "messages": [{"role": "user", "content": user_content}],
             "temperature": 0.1,
             "max_tokens": 1000,
+        }
+        if "moondream" not in model.lower():
+            payload["response_format"] = {"type": "json_object"}
+        return payload
+
+    def _extract_fallback_from_text(
+        self,
+        raw_text: str,
+        declared_finish: str | None = None,
+        success: bool = True,
+    ) -> dict[str, Any]:
+        """Extracts structured signals from plain text responses for models that do not output JSON (e.g. moondream)."""
+        low = raw_text.lower()
+        render_indicators = ("render", "wizualizacj", "3d model", "computer generated", "cad", "archviz", "grafika")
+        is_render = any(ind in low for ind in render_indicators)
+
+        finish = "NIEZNANY"
+        if any(
+            x in low
+            for x in (
+                "do zamieszkania",
+                "zamieszka",
+                "umeblowan",
+                "gotow",
+                "wykończon",
+                "wyposazon",
+                "furnished",
+                "inhabited",
+            )
+        ):
+            finish = "DO_ZAMIESZKANIA"
+        elif any(x in low for x in ("dewelopersk", "stan deweloperski")):
+            finish = "DEWELOPERSKI"
+        elif any(
+            x in low for x in ("do wykończenia", "w trakcie budowy", "surowy", "bare walls", "under construction")
+        ):
+            finish = "DO_WYKONCZENIA"
+        elif any(x in low for x in ("do remontu", "wymaga remontu", "stary dom", "needs renovation")):
+            finish = "DO_REMONTU"
+
+        return {
+            "audit_success": success,
+            "vision_is_render": is_render,
+            "vision_finish_condition": finish,
+            "vision_floorplan_details": {},
+            "vision_defects": [],
+            "discrepancy_detected": False,
+            "discrepancy_note": None,
+            "vision_summary": raw_text[:400].strip(),
         }
 
     def parse_vision_response(
         self,
         raw_text: str,
         declared_finish: str | None = None,
+        success: bool = True,
     ) -> dict[str, Any]:
         """Parses and validates Vision LLM response against Living Quarters rules."""
         default_res: dict[str, Any] = {
+            "audit_success": success,
             "vision_is_render": False,
             "vision_finish_condition": "NIEZNANY",
             "vision_floorplan_details": {},
@@ -400,13 +545,13 @@ class VisionAnalyzer:
                     data = None
 
         if not data:
-            return default_res
+            return self._extract_fallback_from_text(raw_text, declared_finish=declared_finish, success=success)
 
         try:
             is_render = bool(data.get("is_render", False))
             visual_finish = str(data.get("visual_finish_condition", "NIEZNANY")).strip().upper()
             floorplan_details = data.get("floorplan_details") or {}
-            defects = data.get("defects") or []
+            defects = normalize_vision_defects(data.get("defects") or [])
             summary = data.get("summary", "")
             discrepancy_note = data.get("discrepancy_note")
 
@@ -423,6 +568,7 @@ class VisionAnalyzer:
                         )
 
             return {
+                "audit_success": True,
                 "vision_is_render": is_render,
                 "vision_finish_condition": visual_finish,
                 "vision_floorplan_details": floorplan_details,
@@ -444,6 +590,7 @@ class VisionAnalyzer:
         api_base: str | None = None,
         api_key: str | None = None,
         model_name: str | None = None,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """
         Runs vision audit on listing photos. If no vision API key is configured or
@@ -453,14 +600,14 @@ class VisionAnalyzer:
         """
         valid_urls = [u for u in (image_urls or []) if u and u.startswith(("http://", "https://", "data:image/"))]
         if not valid_urls or client is None:
-            return self.parse_vision_response("", declared_finish=declared_finish)
+            return self.parse_vision_response("", declared_finish=declared_finish, success=False)
 
-        target_base, target_key, model_name = resolve_vision_target(api_base, api_key, model_name)
+        target_base, target_key, resolved_model = resolve_vision_target(api_base, api_key, model_name)
         is_local = is_local_vision_base(target_base)
 
         # In offline/no-key mode, return graceful default
         if not target_key and not is_local:
-            return self.parse_vision_response("", declared_finish=declared_finish)
+            return self.parse_vision_response("", declared_finish=declared_finish, success=False)
 
         # Download & encode images to base64 data URIs concurrently so local engines
         # (Ollama) and cloud APIs receive pre-processed, lightweight photos.
@@ -477,12 +624,12 @@ class VisionAnalyzer:
                 prepared_images.append(orig_url)
 
         if not prepared_images:
-            return self.parse_vision_response("", declared_finish=declared_finish)
+            return self.parse_vision_response("", declared_finish=declared_finish, success=False)
 
         payload = self.build_openai_vision_payload(
             image_urls=prepared_images,
             declared_finish=declared_finish,
-            model_name=model_name,
+            model_name=resolved_model,
         )
 
         headers = {
@@ -491,22 +638,28 @@ class VisionAnalyzer:
         if target_key:
             headers["Authorization"] = f"Bearer {target_key}"
 
+        req_timeout = timeout or self.timeout or (90.0 if is_local else 60.0)
+
         try:
             resp = await client.post(
                 f"{target_base}/chat/completions",
                 json=payload,
                 headers=headers,
-                timeout=self.timeout,
+                timeout=req_timeout,
             )
             if resp.status_code == 200:
                 body = resp.json()
                 content = body["choices"][0]["message"]["content"]
-                return self.parse_vision_response(content, declared_finish=declared_finish)
-            logger.debug(f"[VisionAnalyzer] HTTP {resp.status_code}: {resp.text[:200]}")
+                return self.parse_vision_response(content, declared_finish=declared_finish, success=True)
+            logger.warning(
+                f"[VisionAnalyzer] HTTP {resp.status_code} from {target_base} (model: {resolved_model}): {resp.text[:300]}"
+            )
         except Exception as e:
-            logger.debug(f"[VisionAnalyzer] Request note: {e}")
+            logger.warning(
+                f"[VisionAnalyzer] Vision request failed ({type(e).__name__}): {e or repr(e)} [target: {target_base}, model: {resolved_model}]"
+            )
 
-        return self.parse_vision_response("", declared_finish=declared_finish)
+        return self.parse_vision_response("", declared_finish=declared_finish, success=False)
 
 
 vision_analyzer = VisionAnalyzer()

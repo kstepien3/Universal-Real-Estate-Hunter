@@ -19,6 +19,40 @@ class Base(DeclarativeBase):
     pass
 
 
+def _normalize_defect_entry(d: Any) -> str:
+    """Safely normalizes a defect item (string, dict, or primitive) to human-readable string."""
+    if not d:
+        return ""
+    if isinstance(d, str):
+        return d.strip()
+    if isinstance(d, dict):
+        desc = (
+            d.get("description")
+            or d.get("defect")
+            or d.get("defect_type")
+            or d.get("wada")
+            or d.get("note")
+            or d.get("name")
+            or d.get("text")
+            or ""
+        )
+        photo = (
+            d.get("photo_id")
+            if d.get("photo_id") is not None
+            else (
+                d.get("photo_index")
+                if d.get("photo_index") is not None
+                else (d.get("image_index") if d.get("image_index") is not None else d.get("image_id"))
+            )
+        )
+        prefix = f"[Zdjęcie {photo}] " if photo is not None else ""
+        if desc:
+            return f"{prefix}{desc}".strip()
+        val_strs = [str(v) for v in d.values() if v is not None and not isinstance(v, (dict, list))]
+        return f"{prefix}{' — '.join(val_strs)}".strip() if val_strs else json.dumps(d, ensure_ascii=False)
+    return str(d).strip()
+
+
 class ListingModel(Base):
     __tablename__ = "listings"
 
@@ -125,6 +159,8 @@ class ListingModel(Base):
     vision_finish_condition: Mapped[str | None] = mapped_column(String(50), nullable=True)
     _vision_floorplan_details: Mapped[str] = mapped_column("vision_floorplan_details", Text, default="{}")
     _vision_defects: Mapped[str] = mapped_column("vision_defects", Text, default="[]")
+    vision_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    vision_discrepancy_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Extended Intelligence: Commute & Pedestrian Safety
     commute_drive_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -378,13 +414,30 @@ class ListingModel(Base):
     @property
     def vision_defects(self) -> list[str]:
         try:
-            return json.loads(self._vision_defects) if self._vision_defects else []
+            raw = json.loads(self._vision_defects) if self._vision_defects else []
+            if not isinstance(raw, list):
+                raw = [raw]
+            res: list[str] = []
+            seen: set[str] = set()
+            for x in raw:
+                norm = _normalize_defect_entry(x)
+                if norm and norm not in seen:
+                    seen.add(norm)
+                    res.append(norm)
+            return res
         except Exception:
             return []
 
     @vision_defects.setter
-    def vision_defects(self, value: list[str] | None):
-        self._vision_defects = json.dumps(value or [], ensure_ascii=False)
+    def vision_defects(self, value: list[Any] | None):
+        res: list[str] = []
+        seen: set[str] = set()
+        for x in value or []:
+            norm = _normalize_defect_entry(x)
+            if norm and norm not in seen:
+                seen.add(norm)
+                res.append(norm)
+        self._vision_defects = json.dumps(res, ensure_ascii=False)
 
     @property
     def developer_risk_reasons(self) -> list[str]:

@@ -622,6 +622,8 @@ class LiveDashboardServer:
         cloud_llm_timeout_seconds = None
         openrouter_model = None
         llm_provider = None
+        vision_model = None
+        vision_base_url = None
         if request.can_read_body and (request.content_length or 0) > 0:
             try:
                 body = await request.json()
@@ -677,6 +679,10 @@ class LiveDashboardServer:
                         openrouter_model = str(body["openrouter_model"]).strip()
                     if body.get("llm_provider"):
                         llm_provider = str(body["llm_provider"]).strip()
+                    if "vision_model" in body:
+                        vision_model = str(body["vision_model"]).strip()
+                    if "vision_base_url" in body:
+                        vision_base_url = str(body["vision_base_url"]).strip()
             except Exception:
                 pass
 
@@ -696,6 +702,8 @@ class LiveDashboardServer:
             "cloud_llm_timeout_seconds": cloud_llm_timeout_seconds,
             "openrouter_model": openrouter_model,
             "llm_provider": llm_provider,
+            "vision_model": vision_model,
+            "vision_base_url": vision_base_url,
         }
         analyzer = LLMAnalyzer.from_config(cfg, **overrides)
         res = await analyzer.test_connection()
@@ -1339,6 +1347,8 @@ class LiveDashboardServer:
             "vision_finish_condition": item.vision_finish_condition,
             "vision_floorplan_details": item.vision_floorplan_details,
             "vision_defects": item.vision_defects,
+            "vision_summary": getattr(item, "vision_summary", None),
+            "vision_discrepancy_note": getattr(item, "vision_discrepancy_note", None),
             "commute_drive_min": item.commute_drive_min,
             "commute_drive_km": item.commute_drive_km,
             "commute_station_min": item.commute_station_min,

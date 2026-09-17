@@ -208,6 +208,8 @@ class LLMAnalyzer:
                 "local_llm_preset",
                 "local_llm_num_ctx",
                 "cloud_llm_timeout_seconds",
+                "vision_model",
+                "vision_base_url",
             )
             for key in supported_fields:
                 val = data.get(key)
@@ -235,6 +237,8 @@ class LLMAnalyzer:
         local_llm_preset: str | None = None,
         local_llm_num_ctx: int | None = None,
         cloud_llm_timeout_seconds: float | None = None,
+        vision_model: str | None = None,
+        vision_base_url: str | None = None,
     ) -> None:
         cfg = None
         try:
@@ -344,6 +348,16 @@ class LLMAnalyzer:
         self.local_llm_num_ctx = self.ollama_num_ctx
         self.llm_provider = (
             (llm_provider or (getattr(cfg, "llm_provider", None) if cfg else None) or "auto").lower().strip()
+        )
+        self.vision_model = (
+            str(vision_model).strip()
+            if vision_model is not None
+            else ((getattr(cfg, "vision_model", None) if cfg else None) or "")
+        )
+        self.vision_base_url = (
+            str(vision_base_url).strip()
+            if vision_base_url is not None
+            else ((getattr(cfg, "vision_base_url", None) if cfg else None) or "")
         )
         self.last_measured_tok_per_sec: float | None = None
         # Metadata of the last successful call (kept off the result dict).
@@ -794,6 +808,23 @@ class LLMAnalyzer:
         installed_union = list(
             dict.fromkeys([*(ollama_res.get("installed_models") or []), *(local_res.get("installed_models") or [])])
         )
+        v_base, v_key, v_model = resolve_vision_target(
+            api_base=self.vision_base_url or None,
+            model_name=self.vision_model or None,
+        )
+        v_is_local = is_local_vision_base(v_base)
+        v_installed = [m.split(":")[0].lower() for m in installed_union] + [m.lower() for m in installed_union]
+        v_is_missing_local = bool(
+            v_is_local
+            and v_model
+            and (v_model.split(":")[0].lower() not in v_installed and v_model.lower() not in v_installed)
+        )
+        v_warning: str | None = None
+        if v_is_missing_local:
+            v_warning = f"Model '{v_model}' nie jest pobrany w lokalnej Ollama (uruchom: ollama run {v_model})"
+        elif v_model and "moondream" in v_model.lower():
+            v_warning = "Moondream (1.7B) jest modelem o niskiej precyzji strukturalnej. Do audytu Living Quarters zalecany jest qwen2.5vl:7b lub OpenRouter (google/gemini-2.5-flash)."
+
         return {
             "enabled": bool(self.enabled),
             "configured_provider": self.llm_provider,
@@ -809,10 +840,11 @@ class LLMAnalyzer:
             "suggested_vision_models": SUGGESTED_OLLAMA_VISION_MODELS,
             "installed_vision_models": [m for m in installed_union if is_vision_model(m)],
             "vision_target": {
-                "base_url": resolve_vision_target()[0],
-                "model": resolve_vision_target()[2],
-                "ready": bool(resolve_vision_target()[1]) or is_local_vision_base(resolve_vision_target()[0]),
-                "is_local": is_local_vision_base(resolve_vision_target()[0]),
+                "base_url": v_base,
+                "model": v_model,
+                "ready": (bool(v_key) or v_is_local) and not v_is_missing_local,
+                "is_local": v_is_local,
+                "warning": v_warning,
             },
         }
 

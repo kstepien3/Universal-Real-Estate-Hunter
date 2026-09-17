@@ -3121,6 +3121,10 @@
             if (!inp) return;
             if (val !== 'custom') {
                 inp.value = val;
+                const baseInp = document.getElementById('cfgVisionBaseUrl');
+                if (baseInp && (val.includes('/') || val.startsWith('gpt-')) && (baseInp.value.includes('11434') || baseInp.value.includes('1234'))) {
+                    baseInp.value = '';
+                }
             } else {
                 inp.focus();
                 inp.select();
@@ -3150,6 +3154,10 @@
             if (input) {
                 input.value = modelName;
             }
+            const baseInp = document.getElementById('cfgVisionBaseUrl');
+            if (baseInp && (modelName.includes('/') || modelName.startsWith('gpt-')) && (baseInp.value.includes('11434') || baseInp.value.includes('1234'))) {
+                baseInp.value = '';
+            }
             syncVisionModelSelectWithInput(modelName);
         }
         function setVisionBaseUrlChip(url) {
@@ -3160,8 +3168,7 @@
         }
         function updateVisionModelSelectOptions(installedModels, currentVal) {
             const sel = document.getElementById('cfgVisionModelSelect');
-            if (!sel) return;
-            const defaults = ['', 'qwen2.5vl:7b', 'llama3.2-vision:11b', 'minicpm-v:8b', 'moondream', 'google/gemini-2.0-flash-001', 'gpt-4o-mini', 'gpt-4o'];
+            const defaults = ['', 'google/gemini-2.5-flash', 'google/gemini-2.5-flash-lite:nitro', 'qwen2.5vl:7b', 'llama3.2-vision:11b', 'minicpm-v:8b', 'moondream:latest', 'gpt-4o-mini', 'gpt-4o'];
             const allModels = Array.from(new Set([...(installedModels || []), ...defaults]));
             const cur = currentVal ?? document.getElementById('cfgVisionModel')?.value?.trim() ?? '';
             let html = allModels.map(m => {
@@ -3215,6 +3222,8 @@
             const requestedCloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || null;
             const requestedOpenRouter = document.getElementById('cfgOpenRouterModel')?.value?.trim() || null;
             const requestedProvider = document.getElementById('cfgLlmProvider')?.value || null;
+            const requestedVisionModel = document.getElementById('cfgVisionModel')?.value?.trim() ?? null;
+            const requestedVisionBaseUrl = document.getElementById('cfgVisionBaseUrl')?.value?.trim() ?? null;
 
             if (btn) btn.disabled = true;
             if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
@@ -3238,7 +3247,9 @@
                     ollama_temperature: requestedLocalTemp,
                     ollama_num_ctx: requestedLocalCtx,
                     openrouter_model: requestedOpenRouter,
-                    llm_provider: requestedProvider
+                    llm_provider: requestedProvider,
+                    vision_model: requestedVisionModel,
+                    vision_base_url: requestedVisionBaseUrl
                 });
                 lastLlmStatusData = data;
                 renderLlmStatus(data);
@@ -3457,10 +3468,11 @@
 
             if (data.vision_target) {
                 const vt = data.vision_target;
-                const vBadge = vt.ready
+                const vHasWarn = Boolean(vt.warning);
+                const vBadge = (vt.ready && !vHasWarn)
                     ? '<span class="llm-provider-badge ok">Gotowy</span>'
-                    : '<span class="llm-provider-badge warn">Brak klucza / silnika</span>';
-                const vDot = vt.ready ? 'ok' : 'warn';
+                    : (vHasWarn ? '<span class="llm-provider-badge warn">Uwaga</span>' : '<span class="llm-provider-badge warn">Brak klucza / silnika</span>');
+                const vDot = (vt.ready && !vHasWarn) ? 'ok' : 'warn';
                 const vRow = `
                     <div class="llm-provider-row">
                         <div class="llm-provider-main">
@@ -3471,7 +3483,7 @@
                                 ${vBadge}
                             </div>
                             <div class="llm-provider-msg">
-                                Serwer: <code>${escapeHtml(vt.base_url || 'auto')}</code> · ${vt.ready ? (vt.is_local ? 'Lokalny silnik wizyjny gotowy' : 'Połączenie z modelem aktywne') : 'Wymaga klucza API w .env lub uruchomionej lokalnej Ollamy'}
+                                Serwer: <code>${escapeHtml(vt.base_url || 'auto')}</code> · ${vHasWarn ? `<span style="color:var(--yellow,#f59e0b);">${escapeHtml(vt.warning)}</span>` : (vt.ready ? (vt.is_local ? 'Lokalny silnik wizyjny gotowy' : 'Połączenie z modelem aktywne') : 'Wymaga klucza API w .env lub uruchomionej lokalnej Ollamy')}
                             </div>
                         </div>
                     </div>

@@ -155,7 +155,8 @@ async def audit_vision_data(target: Any) -> dict[str, Any] | None:
             gallery = [main_img, *gallery]
         if not gallery:
             return None
-        if getattr(target, "vision_finish_condition", None) is not None:
+        existing_finish = getattr(target, "vision_finish_condition", None)
+        if existing_finish and existing_finish != "NIEZNANY":
             return None
         import httpx
 
@@ -165,7 +166,7 @@ async def audit_vision_data(target: Any) -> dict[str, Any] | None:
                 image_urls=gallery[:6],
                 declared_finish=declared_finish_label(target),
             )
-        if isinstance(vision_res, dict):
+        if isinstance(vision_res, dict) and vision_res.get("audit_success", True):
             from src.models.listing import VISION_FIELDS
 
             vision_payload = {
@@ -173,6 +174,9 @@ async def audit_vision_data(target: Any) -> dict[str, Any] | None:
                 "vision_finish_condition": vision_res.get("vision_finish_condition"),
                 "vision_floorplan_details": vision_res.get("vision_floorplan_details"),
                 "vision_defects": vision_res.get("vision_defects"),
+                "vision_summary": vision_res.get("vision_summary"),
+                "vision_discrepancy_note": vision_res.get("discrepancy_note")
+                or vision_res.get("vision_discrepancy_note"),
             }
             apply_if_present(target, vision_payload, VISION_FIELDS)
             return vision_res

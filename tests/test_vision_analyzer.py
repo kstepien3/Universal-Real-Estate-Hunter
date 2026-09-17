@@ -189,17 +189,45 @@ def test_is_local_vision_base_recognition():
 def test_resolve_vision_target_openrouter_fallback(monkeypatch):
     from config import settings
     from src.filters.vision_analyzer import resolve_vision_target
+    from src.services.config_manager import config_manager
 
     monkeypatch.setattr(settings, "VISION_BASE_URL", None)
     monkeypatch.setattr(settings, "VISION_API_KEY", None)
     monkeypatch.setattr(settings, "VISION_MODEL", None)
     monkeypatch.setattr(settings, "OPENAI_API_KEY", None)
     monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "mock-openrouter-key")
+    monkeypatch.setattr(settings, "OPENROUTER_MODEL", "meta-llama/llama-3-8b")  # text-only
+
+    cfg = config_manager.get_config()
+    monkeypatch.setattr(cfg, "openrouter_model", "")
 
     base, key, model = resolve_vision_target()
     assert "openrouter.ai" in base
     assert key == "mock-openrouter-key"
-    assert model == "google/gemini-2.0-flash-001"
+    assert model == "google/gemini-2.5-flash"
+
+
+def test_resolve_vision_target_retires_gemini_2_0(monkeypatch):
+    from config import settings
+    from src.filters.vision_analyzer import resolve_vision_target
+
+    monkeypatch.setattr(settings, "VISION_BASE_URL", None)
+    monkeypatch.setattr(settings, "VISION_API_KEY", None)
+    monkeypatch.setattr(settings, "VISION_MODEL", "google/gemini-2.0-flash-001")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "mock-key")
+
+    base, key, model = resolve_vision_target()
+    assert model == "google/gemini-2.5-flash"
+
+
+def test_parse_vision_response_text_fallback():
+    from src.filters.vision_analyzer import vision_analyzer
+
+    raw = "The image features a large finished white house, fully furnished with ready kitchen and modern rooms."
+    res = vision_analyzer.parse_vision_response(raw)
+    assert res["vision_finish_condition"] == "DO_ZAMIESZKANIA"
+    assert res["vision_is_render"] is False
+    assert res["audit_success"] is True
 
 
 def test_resolve_vision_target_mix_openrouter_text_and_ollama_vision(monkeypatch):
@@ -226,3 +254,48 @@ def test_resolve_vision_target_mix_openrouter_text_and_ollama_vision(monkeypatch
     assert "11434" in base or "localhost" in base
     assert key == ""  # Local Ollama needs no key
     assert model == "qwen2.5vl:7b"
+
+
+def test_resolve_vision_target_gemini_overrides_stale_ollama_base(monkeypatch: pytest.MonkeyPatch) -> None:
+    """When a user specifies a Gemini model, even with a leftover Ollama base URL,
+
+    resolve_vision_target must route to OpenRouter with the normalized model name.
+    """
+    from config import settings
+    from src.filters.vision_analyzer import resolve_vision_target
+
+    monkeypatch.setattr(settings, "VISION_BASE_URL", None)
+    monkeypatch.setattr(settings, "VISION_API_KEY", None)
+    monkeypatch.setattr(settings, "VISION_MODEL", None)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "sk-or-v1-testkey")
+
+    base, key, model = resolve_vision_target(
+        api_base="http://host.docker.internal:11434",
+        model_name="gemini 2.5 flash lite",
+    )
+    assert base == "https://openrouter.ai/api/v1"
+    assert key == "sk-or-v1-testkey"
+    assert model == "google/gemini-2.5-flash-lite:nitro"
+
+
+def test_normalize_vision_defects() -> None:
+    from src.filters.vision_analyzer import normalize_vision_defects
+
+    # Raw list of dicts from Vision LLMs
+    raw = [
+        {"photo_id": 0, "description": "Słup wysokiego napięcia widoczny na zdjęciu."},
+        {"photo_id": 2, "description": "Słup wysokiego napięcia widoczny na zdjęciu."},
+        {"photo_index": 3, "defect": "Brak balustrad na schodach"},
+        {"image_index": 4, "defect_type": "Wystające przewody"},
+        "Prosty ciąg tekstowy",
+        {"wada": "Wilgoć w piwnicy"},
+    ]
+    res = normalize_vision_defects(raw)
+    assert res == [
+        "[Zdjęcie 0] Słup wysokiego napięcia widoczny na zdjęciu.",
+        "[Zdjęcie 2] Słup wysokiego napięcia widoczny na zdjęciu.",
+        "[Zdjęcie 3] Brak balustrad na schodach",
+        "[Zdjęcie 4] Wystające przewody",
+        "Prosty ciąg tekstowy",
+        "Wilgoć w piwnicy",
+    ]
