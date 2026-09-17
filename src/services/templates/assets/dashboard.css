@@ -165,11 +165,15 @@
             width: 24px; height: 24px;
             flex: none;
             border-radius: var(--r-sm);
-            background: var(--surface-2);
-            border: 1px solid var(--border);
             display: flex; align-items: center; justify-content: center;
-            color: var(--text-primary);
-            box-shadow: var(--edge);
+            overflow: hidden;
+        }
+
+        .brand-logo-img {
+            width: 24px; height: 24px;
+            display: block;
+            border-radius: var(--r-sm);
+            object-fit: contain;
         }
 
         .brand-meta { display: flex; flex-direction: column; min-width: 0; }

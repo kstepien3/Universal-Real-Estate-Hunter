@@ -46,6 +46,7 @@ ASSET_CONTENT_TYPES = {
     ".css": "text/css",
     ".js": "application/javascript",
     ".json": "application/json",
+    ".webmanifest": "application/manifest+json",
     ".map": "application/json",
     ".svg": "image/svg+xml",
     ".png": "image/png",
@@ -288,6 +289,7 @@ class LiveDashboardServer:
 
     def _setup_routes(self):
         self.app.router.add_get("/", self.handle_index)
+        self.app.router.add_get("/favicon.ico", self.handle_favicon)
         self.app.router.add_get("/img", self.handle_image_proxy)
         self.app.router.add_get("/assets/{path:.*}", self.handle_assets)
         self.app.router.add_get("/api/listings", self.handle_get_listings)
@@ -761,6 +763,21 @@ class LiveDashboardServer:
         if not version:
             return match.group(0)
         return f'{attr}="{path}?v={version}"'
+
+    async def handle_favicon(self, request: web.Request) -> web.Response:
+        fav_path = (ASSET_DIR / "favicon.ico").resolve()
+        if not fav_path.is_file():
+            return web.Response(status=404, text="Not found")
+        content = fav_path.read_bytes()
+        etag = f'"{hashlib.md5(content, usedforsecurity=False).hexdigest()}"'
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(status=304)
+        return web.Response(
+            body=content,
+            content_type="image/x-icon",
+            charset=None,
+            headers={"ETag": etag, "Cache-Control": "public, max-age=86400"},
+        )
 
     async def handle_assets(self, request: web.Request) -> web.Response:
         rel = str(request.match_info.get("path", ""))
