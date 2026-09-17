@@ -50,40 +50,47 @@ function renderLandAuditHtml(item) {
     }
     if (item.mpzp_zone) {
         const isMnp = item.mpzp_status === 'OBOWIĄZUJĄCY';
+        const hasWzInText = /wymagane wz|wymaga wz/i.test(item.mpzp_zone);
         const statusTag = isMnp
             ? `<span class="meta-tag tag-exact">Obowiązujący</span>`
-            : `<span class="meta-tag tag-vis">Wymaga WZ</span>`;
-        legalRows += `<tr${isMnp ? '' : ' class="row-warn"'}><th>MPZP</th><td class="value">${escapeHtml(item.mpzp_zone)} ${statusTag}</td></tr>`;
+            : (hasWzInText ? '' : `<span class="meta-tag tag-vis">Wymaga WZ</span>`);
+        legalRows += `<tr class="${isMnp ? 'row-ok' : 'row-warn'}"><th>MPZP</th><td class="value">${escapeHtml(item.mpzp_zone)} ${statusTag}</td></tr>`;
     } else {
-        legalRows += `<tr class="row-warn"><th>MPZP</th><td class="value">Brak planu miejscowego (wymaga WZ)</td></tr>`;
+        legalRows += `<tr class="row-warn"><th>MPZP</th><td class="value">Brak planu miejscowego (wymagane WZ)</td></tr>`;
     }
     if (item.flood_risk_zone) {
         const isFlood = item.flood_risk_zone === 'ZAGROŻENIE_POWODZIOWE';
-        legalRows += `<tr class="${isFlood ? 'row-danger' : 'row-ok'}"><th>Ryzyko powodziowe</th><td class="value">${isFlood ? 'Zagrożenie powodziowe (ISOK)' : 'Brak zagrożenia (ISOK)'}</td></tr>`;
+        legalRows += `<tr class="${isFlood ? 'row-danger' : 'row-ok'}"><th>Ryzyko powodziowe</th><td class="value">${isFlood ? 'Zagrożenie powodziowe (ISOK)' : 'Brak zagrożenia (teren bezpieczny powodziowo wg ISOK)'}</td></tr>`;
     }
     if (item.landslide_risk) {
         const isLandslide = item.landslide_risk !== 'BRAK' && item.landslide_risk !== 'NIEWYSTĘPUJE';
-        legalRows += `<tr class="${isLandslide ? 'row-danger' : 'row-ok'}"><th>Osuwiska (SOPO)</th><td class="value">${escapeHtml(item.landslide_risk)}</td></tr>`;
+        const valText = isLandslide ? escapeHtml(item.landslide_risk) : 'Brak zagrożenia (teren nieosuwiskowy wg SOPO)';
+        legalRows += `<tr class="${isLandslide ? 'row-danger' : 'row-ok'}"><th>Osuwiska (SOPO)</th><td class="value">${valText}</td></tr>`;
     }
     if (item.parcel_front_width_m) {
         const isNarrow = item.parcel_front_width_m < 16.0;
-        legalRows += `<tr class="${isNarrow ? 'row-warn' : ''}"><th>Front działki</th><td class="value"><span class="num">${item.parcel_front_width_m} m</span> (${item.parcel_shape_type || 'regularna'}${item.parcel_length_m ? `, dł. ~${item.parcel_length_m} m` : ''})</td></tr>`;
+        let shapeLabel = item.parcel_shape_type ? item.parcel_shape_type.toLowerCase() : 'regularna';
+        if (shapeLabel === 'regularny') shapeLabel = 'regularny kształt';
+        const lengthTxt = item.parcel_length_m ? `, dł. ~${item.parcel_length_m} m` : '';
+        legalRows += `<tr class="${isNarrow ? 'row-warn' : 'row-ok'}"><th>Front działki</th><td class="value"><span class="num">${item.parcel_front_width_m} m</span> (${escapeHtml(shapeLabel)}${escapeHtml(lengthTxt)})</td></tr>`;
     }
     if (item.parcel_aspect_ratio || item.parcel_shape_type) {
         const shape = (item.parcel_shape_type || '').toUpperCase();
         const ratio = item.parcel_aspect_ratio || 0;
         const isKiszka = shape.includes('SZNUROWKA') || shape.includes('WĄSKA') || ratio >= 4.0;
-        const shapeDesc = `${item.parcel_shape_type ? escapeHtml(item.parcel_shape_type) : '—'}${item.parcel_aspect_ratio ? ` (proporcje 1:${item.parcel_aspect_ratio})` : ''}`;
-        legalRows += `<tr class="${isKiszka ? 'row-warn' : ''}"><th>Proporcje działki</th><td class="value">${shapeDesc}${isKiszka ? ' — nieustawna „kiszka-działka”, utrudniona zabudowa' : ''}</td></tr>`;
+        let shapeDesc = item.parcel_shape_type || '—';
+        if (shape === 'REGULARNY') shapeDesc = 'Regularne proporcje';
+        if (item.parcel_aspect_ratio) shapeDesc += ` (proporcje 1:${item.parcel_aspect_ratio})`;
+        legalRows += `<tr class="${isKiszka ? 'row-warn' : 'row-ok'}"><th>Proporcje działki</th><td class="value">${escapeHtml(shapeDesc)}${isKiszka ? ' — nieustawna działka, utrudniona zabudowa' : ''}</td></tr>`;
     }
     if (item.egib_soil_class) {
         const soil = String(item.egib_soil_class);
         const isProtected = /(?:^|[^A-Za-z])(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)(?:$|[^A-Za-z])/i.test(soil);
         const isIndustrial = /(?:^|[^A-Za-z])(?:Ba|Bi)(?:$|[^A-Za-z])/.test(soil);
-        const cls = (isProtected || isIndustrial) ? 'row-warn' : '';
+        const cls = (isProtected || isIndustrial) ? 'row-warn' : 'row-ok';
         let hint = '';
         if (isProtected) hint = ' — konieczność i koszt odrolnienia (klasy I–III)';
-        else if (isIndustrial) hint = ' — uciążliwe sąsiedztwo przemysłowe';
+        else if (isIndustrial) hint = ' — sąsiedztwo przemysłowe';
         else if (/^B\b/i.test(soil.trim())) hint = ' — tereny mieszkaniowe';
         legalRows += `<tr class="${cls}"><th>Klasa gruntu EGiB</th><td class="value">${escapeHtml(soil)}${hint}</td></tr>`;
     }
@@ -91,15 +98,17 @@ function renderLandAuditHtml(item) {
         const st = String(item.egib_building_status).toUpperCase();
         const cls = st === 'UJAWNIONY' ? 'row-ok' : (st === 'BRAK_W_EWIDENCJI' ? 'row-danger' : 'row-warn');
         const desc = st === 'UJAWNIONY'
-            ? 'budynek ujawniony w kartotece budynków (odbiór PINB)'
-            : (st === 'BRAK_W_EWIDENCJI' ? 'brak w ewidencji — ryzyko samowoli / budowy w toku' : escapeHtml(item.egib_building_status));
+            ? 'Budynek ujawniony w kartotece budynków (odbiór PINB)'
+            : (st === 'BRAK_W_EWIDENCJI' ? 'Brak w ewidencji — ryzyko samowoli / budowa w toku' : escapeHtml(item.egib_building_status));
         legalRows += `<tr class="${cls}"><th>Status budynku EGiB</th><td class="value">${desc}</td></tr>`;
     }
     if (item.noise_level_db !== null && item.noise_level_db !== undefined || item.noise_zone) {
         const db = (item.noise_level_db !== null && item.noise_level_db !== undefined) ? `${item.noise_level_db} dB Lden` : '';
         const zone = item.noise_zone ? escapeHtml(item.noise_zone) : '';
         const isHigh = (item.noise_level_db !== null && item.noise_level_db !== undefined && item.noise_level_db > 65) || /WYSOKI/i.test(item.noise_zone || '');
-        legalRows += `<tr class="${isHigh ? 'row-danger' : ''}"><th>Hałas GIOŚ</th><td class="value">${[db, zone].filter(Boolean).join(' · ') || '—'} (mapy akustyczne: drogi / tory / lotnisko)</td></tr>`;
+        const isNorm = /NORMATYWNY/i.test(zone) || (item.noise_level_db !== null && item.noise_level_db !== undefined && item.noise_level_db <= 55);
+        const cls = isHigh ? 'row-danger' : (isNorm ? 'row-ok' : '');
+        legalRows += `<tr class="${cls}"><th>Hałas GIOŚ</th><td class="value">${[db, zone].filter(Boolean).join(' · ') || '—'} (mapy akustyczne: drogi / tory / lotnisko)</td></tr>`;
     }
     if (item.nature_protected_zone) {
         legalRows += `<tr class="row-warn"><th>Obszary chronione GDOŚ</th><td class="value">${escapeHtml(item.nature_protected_zone)} (Natura 2000 / park krajobrazowy — ograniczenia)</td></tr>`;
@@ -108,24 +117,35 @@ function renderLandAuditHtml(item) {
         legalRows += `<tr class="row-danger"><th>Strefa konserwatorska NID</th><td class="value">${escapeHtml(item.monument_zone)} (restrykcje WKZ przy remontach)</td></tr>`;
     }
     if (item.cemetery_buffer_zone) {
-        const cz = String(item.cemetery_buffer_zone);
-        const cls = cz === '<50m' ? 'row-danger' : (cz === '50-150m' ? 'row-warn' : '');
-        const desc = cz === '<50m' ? 'ograniczenia sanitarne 50 m (zakaz zabudowy/okien)' : (cz === '50-150m' ? 'ograniczenia sanitarne 50–150 m (ujęcie wody)' : escapeHtml(cz));
+        const cz = String(item.cemetery_buffer_zone).toUpperCase();
+        const isSafe = cz === 'BRAK' || cz === 'BEZPIECZNIE' || cz === '>150M' || cz === 'POZA_STREFĄ';
+        const cls = cz === '<50M' ? 'row-danger' : (cz === '50-150M' ? 'row-warn' : 'row-ok');
+        const desc = cz === '<50M' ? 'Ograniczenia sanitarne <50 m (zakaz zabudowy/okien)'
+            : (cz === '50-150M' ? 'Ograniczenia sanitarne 50–150 m (strefa ujęcia wody)'
+            : (isSafe ? 'Brak ograniczeń sanitarnych (poza strefą cmentarną)' : escapeHtml(item.cemetery_buffer_zone)));
         legalRows += `<tr class="${cls}"><th>Strefa cmentarza</th><td class="value">${desc}</td></tr>`;
     }
     if (item.terrain_slope_pct !== null && item.terrain_slope_pct !== undefined) {
         const isSteep = item.terrain_slope_pct > 8.0;
-        legalRows += `<tr class="${isSteep ? 'row-warn' : ''}"><th>Nachylenie terenu (NMT)</th><td class="value"><span class="num">${item.terrain_slope_pct}%</span> (ekspozycja ${escapeHtml(item.terrain_aspect || 'płaska')})</td></tr>`;
+        const aspectLabel = (item.terrain_aspect || 'płaska').toLowerCase().replace(/y$/, 'a').replace(/i$/, 'ia');
+        legalRows += `<tr class="${isSteep ? 'row-warn' : 'row-ok'}"><th>Nachylenie terenu (NMT)</th><td class="value"><span class="num">${item.terrain_slope_pct}%</span> (ekspozycja ${escapeHtml(aspectLabel)})</td></tr>`;
     }
     if (item.broadband_status) {
         const isFtth = item.broadband_status === 'ŚWIATŁOWÓD_AKTYWNY';
         const isNone = item.broadband_status === 'BRAK_ZASIĘGU';
         const cls = isFtth ? 'row-ok' : (isNone ? 'row-warn' : '');
-        legalRows += `<tr class="${cls}"><th>Światłowód (SIDUSIS)</th><td class="value">${escapeHtml(item.broadband_status)}${item.broadband_details ? ` — ${escapeHtml(item.broadband_details)}` : ''}</td></tr>`;
+        let statusLabel = escapeHtml(item.broadband_status);
+        if (isFtth) statusLabel = 'Światłowód aktywny';
+        else if (isNone) statusLabel = 'Brak potwierdzonego zasięgu stacjonarnego';
+        const details = item.broadband_details ? ` — ${escapeHtml(item.broadband_details)}` : '';
+        legalRows += `<tr class="${cls}"><th>Światłowód (SIDUSIS)</th><td class="value">${statusLabel}${details}</td></tr>`;
     }
     if (item.power_lines_risk) {
         const isHv = /(LINIA|400KV|220KV|110KV|WN)/i.test(String(item.power_lines_risk));
-        legalRows += `<tr class="${isHv ? 'row-danger' : 'row-ok'}"><th>Linie wysokiego napięcia</th><td class="value">${escapeHtml(item.power_lines_risk)}</td></tr>`;
+        const isSafe = String(item.power_lines_risk).toUpperCase() === 'BEZPIECZNIE';
+        const cls = isHv ? 'row-danger' : 'row-ok';
+        const label = isSafe ? 'Bezpieczna odległość — brak linii WN w buforze 200 m' : escapeHtml(item.power_lines_risk);
+        legalRows += `<tr class="${cls}"><th>Linie wysokiego napięcia</th><td class="value">${label}</td></tr>`;
     }
     if (item.walkability_pka_name) {
         const distKm = (item.walkability_pka_dist_m / 1000).toFixed(1);
@@ -145,11 +165,11 @@ function renderLandAuditHtml(item) {
         const kwh = item.solar_energy_kwh_m2 ? `${item.solar_energy_kwh_m2} kWh/m²/rok` : '';
         const hrs = item.solar_hours_per_year ? `~${item.solar_hours_per_year} h słońca/rok` : '';
         const solarTxt = [kwh, hrs].filter(Boolean).join(' · ');
-        legalRows += `<tr><th>Potencjał solarny (PVGIS)</th><td class="value"><span class="num">${solarTxt}</span> (baza satelitarna SARAH-3)</td></tr>`;
+        legalRows += `<tr class="row-ok"><th>Potencjał solarny (PVGIS)</th><td class="value"><span class="num">${solarTxt}</span> (baza satelitarna SARAH-3)</td></tr>`;
     }
     if (item.geology_formation || item.geology_risk_note) {
         const isGeoWarn = Boolean(item.geology_risk_note && item.geology_risk_note.includes('⚠️'));
-        legalRows += `<tr class="${isGeoWarn ? 'row-warn' : ''}"><th>Warunki geologiczno-gruntowe</th><td class="value"><strong>${escapeHtml(item.geology_formation || 'Grunty mineralne')}</strong>${item.geology_risk_note ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(item.geology_risk_note)}</div>` : ''}</td></tr>`;
+        legalRows += `<tr class="${isGeoWarn ? 'row-warn' : 'row-ok'}"><th>Warunki geologiczno-gruntowe</th><td class="value"><strong>${escapeHtml(item.geology_formation || 'Grunty mineralne')}</strong>${item.geology_risk_note ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(item.geology_risk_note)}</div>` : ''}</td></tr>`;
     }
 
     const legalHtml = legalRows ? `
@@ -194,22 +214,28 @@ function renderLandAuditHtml(item) {
             }
         }
 
+        const tcoVerdictClean = (tco.verdict || '').replace(/(\d),(\d{3})/g, '$1 $2');
+
         tcoHtml = `
             <div class="audit-block">
                 <div class="audit-block-head">
                     <div class="audit-block-title">Struktura kosztów całkowitych (CAPEX)</div>
-                    <span class="audit-verdict-badge ${getSeverityBadgeClass(tco.severity)}">${escapeHtml(tco.verdict)}</span>
+                    <span class="audit-verdict-badge ${getSeverityBadgeClass(tco.severity)}">${escapeHtml(tcoVerdictClean || tco.verdict)}</span>
                 </div>
                 <table class="capex-table">
                     <thead>
-                        <tr><th>Pozycja kosztowa</th><th>Szacunek</th><th>Podstawa</th></tr>
+                        <tr>
+                            <th style="width:38%;">Pozycja kosztowa</th>
+                            <th class="amount" style="width:24%;">Szacunek</th>
+                            <th>Podstawa kalkulacji</th>
+                        </tr>
                     </thead>
                     <tbody>
                         ${breakdownRows}
                         <tr class="total">
                             <td>Suma nakładów kapitałowych</td>
                             <td class="amount">${formatPrice(tco.total_acquisition_cost)}</td>
-                            <td class="note">Koszt zakupu + podatki + opłaty + adaptacja</td>
+                            <td class="note">Cena zakupu + podatki i opłaty + adaptacja</td>
                         </tr>
                     </tbody>
                 </table>
