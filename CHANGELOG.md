@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.14.1 (2026-09-17)
+
+### Bug Fixes
+
+- **ci**: Checkout release tag in publish job to fix container version mismatch
+  ([`8bb69f1`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/8bb69f1c49ac84ce0609941f7437a4bfd31392ec))
+
+
 ## v1.14.0 (2026-09-16)
 
 ### Bug Fixes
