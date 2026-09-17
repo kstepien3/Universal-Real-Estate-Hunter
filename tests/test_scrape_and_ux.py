@@ -623,3 +623,29 @@ async def test_live_dashboard_listings_endpoint_contains_full_data():
         detail = await (await client.get(f"/api/listings/{target['id']}")).json()
         assert "land_audit" in detail
         assert "negotiation_arguments" in detail
+
+
+@pytest.mark.asyncio
+async def test_live_dashboard_favicon_and_manifest_endpoints():
+    """Verify /favicon.ico, /assets/favicon.svg, and /assets/site.webmanifest are served correctly."""
+    from aiohttp.test_utils import TestClient, TestServer
+
+    from src.services.live_dashboard import LiveDashboardServer
+
+    server = LiveDashboardServer()
+    async with TestClient(TestServer(server.app)) as client:
+        # 1. Favicon.ico endpoint
+        resp_ico = await client.get("/favicon.ico")
+        assert resp_ico.status == 200
+        assert resp_ico.content_type == "image/x-icon"
+        assert len(await resp_ico.read()) > 0
+
+        # 2. Vector SVG Favicon asset
+        resp_svg = await client.get("/assets/favicon.svg")
+        assert resp_svg.status == 200
+        assert resp_svg.content_type == "image/svg+xml"
+
+        # 3. Web manifest
+        resp_manifest = await client.get("/assets/site.webmanifest")
+        assert resp_manifest.status == 200
+        assert resp_manifest.content_type == "application/manifest+json"
