@@ -6,6 +6,17 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.15.1 (2026-09-17)
+
+### Bug Fixes
+
+- **storage**: Serialize migrations with postgres advisory lock and savepoints
+  ([`738998a`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/738998abf6fc5efba4ee1ab1205016d6b8ccc91d))
+
+- **storage,logging**: Drop legacy property_fingerprint and handle curly braces in logger
+  ([`58f040b`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/58f040b1041103e3e2573136574909cd484324c0))
+
+
 ## v1.15.0 (2026-09-17)
 
 ### Features
