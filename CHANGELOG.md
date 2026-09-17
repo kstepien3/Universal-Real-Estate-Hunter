@@ -6,6 +6,22 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.14.2 (2026-09-17)
+
+### Code Style
+
+- **ui**: Unify due diligence drawer tables, typography, and spacing
+  ([`8264df1`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/8264df1f051645fca201576e3a16ce2395c914d8))
+
+### Refactoring
+
+- **filters,storage**: Deduplicate persistence and streamline filter models
+  ([`b7256e8`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/b7256e8c59b7989f96afe6f560104ad9d91dda30))
+
+- **pipeline**: Unify spatial audit and consolidate notification dispatch
+  ([`3552123`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/3552123f33b914b4ef75762d05b09a825992edfb))
+
+
 ## v1.14.1 (2026-09-17)
 
 ### Bug Fixes
