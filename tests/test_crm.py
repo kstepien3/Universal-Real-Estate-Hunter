@@ -73,8 +73,12 @@ async def test_crm_status_and_notes(test_session: AsyncSession):
 
 
 @pytest.mark.asyncio
-async def test_geocoder_fallback(test_session: AsyncSession):
+async def test_geocoder_fallback(test_session: AsyncSession, monkeypatch: pytest.MonkeyPatch):
+    from unittest.mock import AsyncMock
+
     geocoder = NominatimGeocoder()
+    # Mock network query to fail, guaranteeing test runs offline and validates centroid/district fallback
+    monkeypatch.setattr(geocoder, "_rate_limited_query", AsyncMock(return_value=None))
 
     # Test centroid/geocoding matching for Słocina
     lat, lon, is_exact = await geocoder.geocode(
@@ -83,6 +87,7 @@ async def test_geocoder_fallback(test_session: AsyncSession):
         city="Rzeszów",
     )
     assert lat is not None and lon is not None
+    assert is_exact is False
     assert abs(lat - 50.02) < 0.05
     assert abs(lon - 22.05) < 0.05
 
@@ -92,6 +97,7 @@ async def test_geocoder_fallback(test_session: AsyncSession):
         city="Krasne",
     )
     assert lat is not None and lon is not None
+    assert is_exact is False
     assert abs(lat - 50.04) < 0.05
     assert abs(lon - 22.08) < 0.05
 
