@@ -101,7 +101,15 @@ class GeoportalService:
                     existing.expires_at = exp
                 else:
                     session.add(SpatialCacheModel(cache_key=key, data_json=data_str, expires_at=exp))
-                await safe_commit(session)
+                try:
+                    await safe_commit(session)
+                except Exception:
+                    await session.rollback()
+                    existing = await session.get(SpatialCacheModel, key)
+                    if existing:
+                        existing.data_json = data_str
+                        existing.expires_at = exp
+                        await safe_commit(session)
         except Exception:
             pass
 

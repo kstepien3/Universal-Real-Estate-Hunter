@@ -55,7 +55,7 @@ class SchedulerRunner:
             logger.info(f"[Scheduler] Uruchamianie cyklu scrapowania (aktywny interwał: {interval}m){prof_str}...")
             await self.pipeline.run_cycle(target_profile=self.target_profile)
         except Exception as e:
-            logger.error(f"[Scheduler] Nieoczekiwany błąd podczas cyklu: {e}", exc_info=True)
+            logger.error("[Scheduler] Nieoczekiwany błąd podczas cyklu: {}", e, exc_info=True)
 
     def stop(self):
         logger.info("[Scheduler] Otrzymano sygnał zatrzymania.")

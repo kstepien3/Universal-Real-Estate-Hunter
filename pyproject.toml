@@ -104,6 +104,7 @@ addopts = [
     "-v",
     "--strict-markers",
     "--tb=short",
+    "--basetemp=.pytest_tmp",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning",
