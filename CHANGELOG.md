@@ -6,6 +6,19 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.15.2 (2026-09-17)
+
+### Bug Fixes
+
+- **ui**: Highlight map cluster group when hovering house card in list
+  ([`3cf021a`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/3cf021a3577046f09723fcfff99be6f51017c170))
+
+### Chores
+
+- **deps**: Update package dependencies and refresh lockfile
+  ([`ff94e58`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/ff94e5891ac814ffa4bed6e177b55995db2dcdbf))
+
+
 ## v1.15.1 (2026-09-17)
 
 ### Bug Fixes
