@@ -90,7 +90,7 @@ jobs:
         run: uv run pytest tests/ -q --tb=short -m "not integration" --cov=src --cov-report=term-missing --cov-fail-under=66
 
   docker:
-    name: Docker image smoke test
+    name: Docker image smoke test (pre-release)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     needs: [lint, test]
@@ -123,7 +123,7 @@ jobs:
       tag: ${{ steps.semantic_release.outputs.tag }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [lint, test]
+    needs: [lint, test, docker]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
     permissions:
       contents: write
@@ -185,8 +185,13 @@ jobs:
       attestations: write
       id-token: write
     steps:
-      - name: Checkout
+      - name: Checkout release tag
         uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Verify release version in source
+        run: grep -q '__version__ = "${{ needs.release.outputs.version }}"' src/version.py
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
