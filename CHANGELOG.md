@@ -6,6 +6,29 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.14.3 (2026-09-17)
+
+### Bug Fixes
+
+- **geocoder**: Resolve suburban municipalities in fallback and mock network in tests
+  ([`abe1b0b`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/abe1b0b91b64374c9fef42511afc42733e0eac00))
+
+### Performance Improvements
+
+- **storage**: Optimize sqlite-to-postgres migration with atomic lock and bulk insert
+  ([`aea4d53`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/aea4d53f9809b094d74b6796b91275eab7d5acb2))
+
+### Refactoring
+
+- **storage,pipeline**: Simplify fingerprints and automate postgres detection
+  ([`00b42d3`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/00b42d345536d5a46e400cfb80d315f364a12b6d))
+
+### Testing
+
+- **air-quality**: Fix mypy type annotations and method mocking in test_air_quality
+  ([`65aa045`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/65aa045834b924337a480b0ef68cda007f32003c))
+
+
 ## v1.14.2 (2026-09-17)
 
 ### Code Style
