@@ -1922,20 +1922,17 @@
             const marker = markersMap[id];
             if (!marker) return;
 
-            if (enable) {
-                marker.setZIndexOffset(10000);
-                const el = marker.getElement();
-                if (el) {
-                    const pin = el.querySelector('.custom-pin');
-                    if (pin) pin.classList.add('pin-highlighted');
-                }
-            } else {
-                marker.setZIndexOffset(0);
-                const el = marker.getElement();
-                if (el) {
-                    const pin = el.querySelector('.custom-pin');
-                    if (pin) pin.classList.remove('pin-highlighted');
-                }
+            const target = (markersGroup && typeof markersGroup.getVisibleParent === 'function')
+                ? (markersGroup.getVisibleParent(marker) || marker)
+                : marker;
+
+            if (typeof target.setZIndexOffset === 'function') {
+                target.setZIndexOffset(enable ? 10000 : 0);
+            }
+            const el = target.getElement ? target.getElement() : null;
+            if (el) {
+                const pin = el.querySelector('.custom-pin, .map-cluster');
+                if (pin) pin.classList.toggle('pin-highlighted', enable);
             }
         }
 

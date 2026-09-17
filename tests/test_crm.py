@@ -521,6 +521,10 @@ async def test_live_dashboard_serves_split_assets():
             assert js_resp.content_type == "application/javascript"
             js_body = await js_resp.text()
             assert "Transport" in js_body or "allListings" in js_body
+            if "dashboard.js" in js_path:
+                assert "getVisibleParent" in js_body
+                assert ".map-cluster" in js_body
+        assert ".map-cluster.pin-highlighted" in css_body
 
         # Missing and path-traversal requests are rejected
         missing_resp = await client.get("/assets/nope.css")
