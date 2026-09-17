@@ -390,7 +390,10 @@ async def _migrate_database_columns(conn) -> None:
                 existing_cols = {str(row[1]).lower() for row in res}
             else:
                 res = sync_conn.execute(
-                    text("SELECT column_name FROM information_schema.columns WHERE table_name = 'listings'")
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_name = 'listings' AND table_schema = current_schema()"
+                    )
                 ).fetchall()
                 existing_cols = {str(row[0]).lower() for row in res}
 
@@ -402,43 +405,58 @@ async def _migrate_database_columns(conn) -> None:
                 if col_name_lower not in existing_cols:
                     logger.info(f"Migrating schema: adding '{col_name}' to listings table")
                     col_def = sqlite_def if is_sqlite else pg_def
-                    if is_sqlite:
-                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_def}"))
-                    else:
-                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
-                    existing_cols.add(col_name_lower)
+                    try:
+                        with sync_conn.begin_nested():
+                            if is_sqlite:
+                                sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_def}"))
+                            else:
+                                sync_conn.execute(
+                                    text(f"ALTER TABLE listings ADD COLUMN IF NOT EXISTS {col_name} {col_def}")
+                                )
+                        existing_cols.add(col_name_lower)
+                    except Exception as col_err:
+                        logger.debug(f"[Database] Add column '{col_name}' note: {col_err}")
 
             if "property_fingerprint" in existing_cols:
                 try:
-                    if "physical_fingerprint" in existing_cols:
-                        sync_conn.execute(
-                            text(
-                                "UPDATE listings SET physical_fingerprint = property_fingerprint "
-                                "WHERE physical_fingerprint IS NULL AND property_fingerprint IS NOT NULL"
+                    with sync_conn.begin_nested():
+                        if "physical_fingerprint" in existing_cols:
+                            sync_conn.execute(
+                                text(
+                                    "UPDATE listings SET physical_fingerprint = property_fingerprint "
+                                    "WHERE physical_fingerprint IS NULL AND property_fingerprint IS NOT NULL"
+                                )
                             )
-                        )
                 except Exception as e:
                     logger.debug(f"[Database] Copy property_fingerprint note: {e}")
 
                 try:
-                    if is_sqlite:
-                        sync_conn.execute(text("ALTER TABLE listings DROP COLUMN property_fingerprint"))
-                    else:
-                        sync_conn.execute(text("ALTER TABLE listings DROP COLUMN IF EXISTS property_fingerprint"))
-                    existing_cols.remove("property_fingerprint")
-                    logger.info("[Database] Obsolete column 'property_fingerprint' successfully removed from schema.")
+                    with sync_conn.begin_nested():
+                        if is_sqlite:
+                            sync_conn.execute(text("ALTER TABLE listings DROP COLUMN property_fingerprint"))
+                        else:
+                            sync_conn.execute(text("ALTER TABLE listings DROP COLUMN IF EXISTS property_fingerprint"))
+                        existing_cols.remove("property_fingerprint")
+                        logger.info(
+                            "[Database] Obsolete column 'property_fingerprint' successfully removed from schema."
+                        )
                 except Exception as e:
                     logger.debug(f"[Database] Drop property_fingerprint note: {e}")
                     if not is_sqlite:
                         try:
-                            sync_conn.execute(
-                                text("ALTER TABLE listings ALTER COLUMN property_fingerprint DROP NOT NULL")
-                            )
+                            with sync_conn.begin_nested():
+                                sync_conn.execute(
+                                    text("ALTER TABLE listings ALTER COLUMN property_fingerprint DROP NOT NULL")
+                                )
                         except Exception:
                             pass
 
             if "profile_id" in existing_cols:
-                sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
+                try:
+                    with sync_conn.begin_nested():
+                        sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
+                except Exception as e:
+                    logger.debug(f"[Database] profile_id update note: {e}")
 
             if not is_sqlite:
                 tz_columns = [
@@ -620,6 +638,9 @@ async def init_db() -> None:
                     await conn.execute(text("PRAGMA journal_mode=WAL;"))
                     await conn.execute(text("PRAGMA busy_timeout=60000;"))
                     await conn.execute(text("PRAGMA synchronous=NORMAL;"))
+                else:
+                    # Transaction-scoped advisory lock prevents race conditions during multi-container startup
+                    await conn.execute(text("SELECT pg_advisory_xact_lock(42424242);"))
                 await conn.run_sync(Base.metadata.create_all)
                 await _migrate_database_columns(conn)
             if not is_sqlite:
