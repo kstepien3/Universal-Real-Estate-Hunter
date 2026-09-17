@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.15.0 (2026-09-17)
+
+### Features
+
+- **ui**: Add brand favicon suite and app topbar logo
+  ([`0c8ba9e`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/0c8ba9efe0212070fe584dc75977a8365f217da4))
+
+
 ## v1.14.3 (2026-09-17)
 
 ### Bug Fixes
