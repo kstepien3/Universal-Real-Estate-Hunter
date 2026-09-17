@@ -486,13 +486,21 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
         logger.debug(f"[Database] Could not check target listings count: {e}")
         return
 
+    # Atomic lock: try renaming candidate to .migrating to prevent concurrent race conditions
+    migrating_path = sqlite_path.with_name(sqlite_path.name + ".migrating")
+    try:
+        sqlite_path.rename(migrating_path)
+    except Exception as lock_err:
+        logger.debug(f"[Database] Could not acquire migration lock for {sqlite_path}: {lock_err}")
+        return
+
     logger.info(
         f"[Database] Wykryto istniejącą bazę SQLite '{sqlite_path}'. Rozpoczynam automatyczną migrację do PostgreSQL..."
     )
     import sqlite3
 
     try:
-        sync_conn = sqlite3.connect(str(sqlite_path))
+        sync_conn = sqlite3.connect(str(migrating_path))
         sync_conn.row_factory = sqlite3.Row
 
         # Check existing tables in SQLite
@@ -501,6 +509,7 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
 
         if "listings" not in existing_tables:
             sync_conn.close()
+            migrating_path.rename(sqlite_path)
             return
 
         async_session_maker = async_sessionmaker(bind=pg_engine, expire_on_commit=False)
@@ -534,8 +543,7 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
                 (SpatialCacheModel, "spatial_cache", ("created_at", "expires_at")),
             ):
                 if records := _load_records(model_cls, tbl, dt_fields):
-                    for rec in records:
-                        await session.merge(rec)
+                    session.add_all(records)
                     await session.flush()
                     logger.info(f"[Database] Zmigrowano {len(records)} wpisów z '{tbl}' do PostgreSQL.")
 
@@ -551,16 +559,23 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
 
         sync_conn.close()
         logger.info("[Database] ✅ Automatyczna migracja ze SQLite do PostgreSQL zakończona pomyślnie!")
-        # Safely rename source SQLite DB as backup to prevent repeated checks
+        # Safely mark migrated database as backup
         try:
-            backup_path = sqlite_path.with_suffix(".db.migrated_backup")
-            if not backup_path.exists():
-                sqlite_path.rename(backup_path)
-                logger.info(f"[Database] Zarchiwizowano stary plik SQLite do: {backup_path}")
+            backup_path = sqlite_path.with_name(sqlite_path.name + ".migrated_backup")
+            if backup_path.exists():
+                backup_path.unlink()
+            migrating_path.rename(backup_path)
+            logger.info(f"[Database] Zarchiwizowano stary plik SQLite do: {backup_path}")
         except Exception as e:
             logger.debug(f"[Database] Nie udało się zmienić nazwy pliku SQLite: {e}")
     except Exception as err:
         logger.warning(f"[Database] Błąd podczas automatycznej migracji SQLite -> PostgreSQL: {err}")
+        # Restore original path on failure so next startup can retry
+        if migrating_path.exists():
+            try:
+                migrating_path.rename(sqlite_path)
+            except Exception:
+                pass
 
 
 async def init_db() -> None:
