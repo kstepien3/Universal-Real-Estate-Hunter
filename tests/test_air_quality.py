@@ -67,7 +67,7 @@ def test_compute_seasonal_metrics():
         pm10.extend([val * 1.5, val * 1.5])
         aqi.extend([val * 1.2, val * 1.2])
 
-    hourly_data = {
+    hourly_data: dict[str, list[Any]] = {
         "time": times,
         "pm2_5": pm25,
         "pm10": pm10,
