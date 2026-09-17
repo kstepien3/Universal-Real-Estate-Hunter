@@ -376,6 +376,32 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("valuation_negotiation_leverage", "VARCHAR(20)", "VARCHAR(20)"),
     ("valuation_fair_market_value", "FLOAT", "DOUBLE PRECISION"),
     ("valuation_opening_offer", "FLOAT", "DOUBLE PRECISION"),
+    # Extended Intelligence: GUNB
+    ("gunb_permits", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("gunb_risk_flags", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("gunb_url", "VARCHAR(500)", "VARCHAR(500)"),
+    ("gunb_status", "VARCHAR(50)", "VARCHAR(50)"),
+    # Extended Intelligence: Vision AI
+    ("vision_is_render", "BOOLEAN", "BOOLEAN"),
+    ("vision_finish_condition", "VARCHAR(50)", "VARCHAR(50)"),
+    ("vision_floorplan_details", "TEXT DEFAULT '{}'", "TEXT DEFAULT '{}'"),
+    ("vision_defects", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    # Extended Intelligence: Commute & Pedestrian Safety
+    ("commute_drive_min", "INTEGER", "INTEGER"),
+    ("commute_drive_km", "FLOAT", "DOUBLE PRECISION"),
+    ("commute_station_min", "INTEGER", "INTEGER"),
+    ("pedestrian_sidewalk", "BOOLEAN", "BOOLEAN"),
+    ("pedestrian_lit", "BOOLEAN", "BOOLEAN"),
+    ("pedestrian_surface", "VARCHAR(50)", "VARCHAR(50)"),
+    ("pedestrian_safety_note", "TEXT", "TEXT"),
+    # Extended Intelligence: Developer & KRS Background Check
+    ("developer_name", "VARCHAR(200)", "VARCHAR(200)"),
+    ("developer_nip", "VARCHAR(20)", "VARCHAR(20)"),
+    ("developer_krs", "VARCHAR(20)", "VARCHAR(20)"),
+    ("developer_capital_pln", "FLOAT", "DOUBLE PRECISION"),
+    ("developer_registration_year", "INTEGER", "INTEGER"),
+    ("developer_risk_level", "VARCHAR(20)", "VARCHAR(20)"),
+    ("developer_risk_reasons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
 ]
 
 

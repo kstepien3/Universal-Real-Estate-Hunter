@@ -56,7 +56,43 @@ AIR_FIELDS: tuple[str, ...] = (
     "air_smog_risk",
 )
 
-SPATIAL_FIELDS: tuple[str, ...] = GEO_FIELDS + AIR_FIELDS
+GUNB_FIELDS: tuple[str, ...] = (
+    "gunb_permits",
+    "gunb_risk_flags",
+    "gunb_url",
+    "gunb_status",
+)
+
+VISION_FIELDS: tuple[str, ...] = (
+    "vision_is_render",
+    "vision_finish_condition",
+    "vision_floorplan_details",
+    "vision_defects",
+)
+
+COMMUTE_FIELDS: tuple[str, ...] = (
+    "commute_drive_min",
+    "commute_drive_km",
+    "commute_station_min",
+    "pedestrian_sidewalk",
+    "pedestrian_lit",
+    "pedestrian_surface",
+    "pedestrian_safety_note",
+)
+
+DEVELOPER_FIELDS: tuple[str, ...] = (
+    "developer_name",
+    "developer_nip",
+    "developer_krs",
+    "developer_capital_pln",
+    "developer_registration_year",
+    "developer_risk_level",
+    "developer_risk_reasons",
+)
+
+EXTENDED_INTELLIGENCE_FIELDS: tuple[str, ...] = GUNB_FIELDS + VISION_FIELDS + COMMUTE_FIELDS + DEVELOPER_FIELDS
+
+SPATIAL_FIELDS: tuple[str, ...] = GEO_FIELDS + AIR_FIELDS + EXTENDED_INTELLIGENCE_FIELDS
 
 
 def apply_if_present(target: Any, source: Any, fields: tuple[str, ...], *, fill_missing: bool = False) -> None:
@@ -209,6 +245,32 @@ class FilterResult(BaseModel):
     air_gios_dist_km: float | None = None
     air_gios_index: str | None = None
     air_smog_risk: str | None = None
+    # Extended Intelligence: GUNB (Building Permits)
+    gunb_permits: list[dict[str, Any]] | None = None
+    gunb_risk_flags: list[str] | None = None
+    gunb_url: str | None = None
+    gunb_status: str | None = None
+    # Extended Intelligence: Vision AI (Living Quarters & Renders)
+    vision_is_render: bool | None = None
+    vision_finish_condition: str | None = None
+    vision_floorplan_details: dict[str, Any] | None = None
+    vision_defects: list[str] | None = None
+    # Extended Intelligence: Commute & Pedestrian Safety
+    commute_drive_min: int | None = None
+    commute_drive_km: float | None = None
+    commute_station_min: int | None = None
+    pedestrian_sidewalk: bool | None = None
+    pedestrian_lit: bool | None = None
+    pedestrian_surface: str | None = None
+    pedestrian_safety_note: str | None = None
+    # Extended Intelligence: Developer & KRS Background Check
+    developer_name: str | None = None
+    developer_nip: str | None = None
+    developer_krs: str | None = None
+    developer_capital_pln: float | None = None
+    developer_registration_year: int | None = None
+    developer_risk_level: str | None = None
+    developer_risk_reasons: list[str] | None = None
 
     @property
     def verdict_icon(self) -> str:
@@ -306,6 +368,32 @@ class ListingSchema(BaseModel):
     air_gios_dist_km: float | None = None
     air_gios_index: str | None = None
     air_smog_risk: str | None = None
+    # Extended Intelligence: GUNB (Building Permits)
+    gunb_permits: list[dict[str, Any]] | None = None
+    gunb_risk_flags: list[str] | None = None
+    gunb_url: str | None = None
+    gunb_status: str | None = None
+    # Extended Intelligence: Vision AI (Living Quarters & Renders)
+    vision_is_render: bool | None = None
+    vision_finish_condition: str | None = None
+    vision_floorplan_details: dict[str, Any] | None = None
+    vision_defects: list[str] | None = None
+    # Extended Intelligence: Commute & Pedestrian Safety
+    commute_drive_min: int | None = None
+    commute_drive_km: float | None = None
+    commute_station_min: int | None = None
+    pedestrian_sidewalk: bool | None = None
+    pedestrian_lit: bool | None = None
+    pedestrian_surface: str | None = None
+    pedestrian_safety_note: str | None = None
+    # Extended Intelligence: Developer & KRS Background Check
+    developer_name: str | None = None
+    developer_nip: str | None = None
+    developer_krs: str | None = None
+    developer_capital_pln: float | None = None
+    developer_registration_year: int | None = None
+    developer_risk_level: str | None = None
+    developer_risk_reasons: list[str] | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     skip_detail: bool = False

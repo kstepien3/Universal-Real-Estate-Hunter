@@ -11,6 +11,12 @@ import httpx
 from loguru import logger
 
 from config import settings
+from src.filters.vision_analyzer import (
+    SUGGESTED_OLLAMA_VISION_MODELS,
+    is_local_vision_base,
+    is_vision_model,
+    resolve_vision_target,
+)
 from src.models.listing import ListingSchema
 
 LLM_MAX_RETRIES = 3
@@ -785,6 +791,9 @@ class LLMAnalyzer:
                     active_provider = providers_map[p_id]
                     break
 
+        installed_union = list(
+            dict.fromkeys([*(ollama_res.get("installed_models") or []), *(local_res.get("installed_models") or [])])
+        )
         return {
             "enabled": bool(self.enabled),
             "configured_provider": self.llm_provider,
@@ -797,6 +806,14 @@ class LLMAnalyzer:
                 "ollama": ollama_res,
             },
             "suggested_models": SUGGESTED_OLLAMA_MODELS,
+            "suggested_vision_models": SUGGESTED_OLLAMA_VISION_MODELS,
+            "installed_vision_models": [m for m in installed_union if is_vision_model(m)],
+            "vision_target": {
+                "base_url": resolve_vision_target()[0],
+                "model": resolve_vision_target()[2],
+                "ready": bool(resolve_vision_target()[1]) or is_local_vision_base(resolve_vision_target()[0]),
+                "is_local": is_local_vision_base(resolve_vision_target()[0]),
+            },
         }
 
     @staticmethod
@@ -1027,6 +1044,48 @@ class LLMAnalyzer:
             spatial_lines.append(f"Flood risk (ISOK): {listing.flood_risk_zone}")
         elif listing.parcel_id:
             spatial_lines.append("Flood risk (ISOK): Poza strefą bezpośredniego zagrożenia")
+
+        gunb_flags = list(getattr(listing, "gunb_risk_flags", None) or [])
+        if gunb_flags:
+            spatial_lines.append(f"Pozwolenia GUNB/RWDZ w promieniu 200 m (ryzyko): {' | '.join(gunb_flags[:3])}")
+        elif list(getattr(listing, "gunb_permits", None) or []):
+            spatial_lines.append("Pozwolenia GUNB/RWDZ w promieniu 200 m: wyłącznie standardowe")
+        if getattr(listing, "gunb_url", None):
+            spatial_lines.append(f"Rejestr GUNB: {listing.gunb_url}")
+
+        if getattr(listing, "vision_finish_condition", None):
+            spatial_lines.append(
+                f"Vision AI ze zdjęć: stan {listing.vision_finish_condition}"
+                f"{' (RENDER 3D, nie fotografia)' if getattr(listing, 'vision_is_render', None) else ''}"
+            )
+            for defect in list(getattr(listing, "vision_defects", None) or [])[:3]:
+                spatial_lines.append(f"Vision AI wada: {defect}")
+
+        commute_min = getattr(listing, "commute_drive_min", None)
+        if commute_min is not None:
+            spatial_lines.append(
+                f"Dojazd do centrum (OSRM): {getattr(listing, 'commute_drive_km', None)} km, {commute_min} min"
+            )
+        if getattr(listing, "pedestrian_safety_note", None):
+            spatial_lines.append(f"Dostęp pieszy (OSM): {listing.pedestrian_safety_note}")
+
+        if getattr(listing, "developer_name", None) or getattr(listing, "developer_risk_level", None):
+            dev_reasons = list(getattr(listing, "developer_risk_reasons", None) or [])
+            spatial_lines.append(
+                f"Deweloper/KRS: {listing.developer_name or 'b/d'} "
+                f"(ryzyko: {listing.developer_risk_level or 'NIEZNANE'})"
+                + (f" — {'; '.join(dev_reasons[:2])}" if dev_reasons else "")
+            )
+
+        nearest_poi = getattr(listing, "nearest_poi", None) or {}
+        if isinstance(nearest_poi, dict) and nearest_poi:
+            poi_bits = []
+            for cat in ("edukacja", "sklepy", "transport"):
+                near = nearest_poi.get(cat) or {}
+                if near.get("walk_min") is not None:
+                    poi_bits.append(f"{cat}: {near.get('dist_m')} m (~{near.get('walk_min')} min pieszo)")
+            if poi_bits:
+                spatial_lines.append(f"Infrastruktura piesza (OSM): {'; '.join(poi_bits)}")
 
         if listing.air_aqi is not None or listing.air_pm25_heating_avg is not None:
             aq_parts = []

@@ -395,11 +395,103 @@ function renderLandAuditHtml(item) {
         `;
     }
 
+    // 6. GUNB building permits (200 m radius)
+    let gunbHtml = '';
+    if (item.gunb_status || (item.gunb_permits && item.gunb_permits.length) || (item.gunb_risk_flags && item.gunb_risk_flags.length)) {
+        const gunbStatus = item.gunb_status || 'BRAK_DANYCH';
+        const gunbCls = /RYZYKO/.test(gunbStatus) ? 'row-danger' : (/BRAK_DANYCH/.test(gunbStatus) ? '' : 'row-ok');
+        const gunbBadge = /RYZYKO/.test(gunbStatus) ? 'audit-verdict-danger' : (/BRAK_DANYCH/.test(gunbStatus) ? 'audit-verdict-warning' : 'audit-verdict-success');
+        const gunbPermits = (item.gunb_permits || []).slice(0, 5).map(p => {
+            const nr = escapeHtml(p.numer_decyzji || p.numer || '—');
+            const zam = escapeHtml(p.nazwa_zamierzenia || p.zamierzenie || '');
+            return `<tr><th>${nr}</th><td class="value">${zam}</td></tr>`;
+        }).join('');
+        const gunbFlags = (item.gunb_risk_flags || []).map(f => `<tr class="row-danger"><th>Ryzyko</th><td class="value">${escapeHtml(f)}</td></tr>`).join('');
+        gunbHtml = `
+            <div class="audit-block">
+                <div class="audit-block-head">
+                    <div class="audit-block-title">Pozwolenia na budowę w sąsiedztwie (GUNB/RWDZ, 200 m)</div>
+                    <span class="audit-verdict-badge ${gunbBadge}">${escapeHtml(gunbStatus)}</span>
+                </div>
+                <table class="dd-table">
+                    ${gunbFlags || (gunbPermits ? '' : `<tr class="${gunbCls}"><th>Status</th><td class="value">Brak danych o pozwoleniach w rejestrze</td></tr>`)}
+                    ${gunbPermits}
+                </table>
+                ${item.gunb_url ? `
+                <div class="audit-actions">
+                    <a href="${escapeHtml(item.gunb_url)}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz wyszukiwarkę GUNB dla tej działki">
+                        ${svgIcon('external')} Wyszukiwarka GUNB
+                    </a>
+                </div>` : ''}
+            </div>
+        `;
+    }
+
+    // 7. Vision AI photo audit (Living Quarters)
+    let visionHtml = '';
+    if (item.vision_finish_condition) {
+        const vRow = item.vision_is_render === true ? 'row-warn' : 'row-ok';
+        const vBadge = item.vision_is_render === true ? 'audit-verdict-warning' : 'audit-verdict-success';
+        const vVerdict = item.vision_is_render === true ? 'WIZUALIZACJE 3D' : item.vision_finish_condition;
+        const fp = item.vision_floorplan_details || {};
+        const defects = (item.vision_defects || []).map(d => `<tr><th>Wada</th><td class="value">${escapeHtml(d)}</td></tr>`).join('');
+        visionHtml = `
+            <div class="audit-block">
+                <div class="audit-block-head">
+                    <div class="audit-block-title">Audyt zdjęć (Vision AI)</div>
+                    <span class="audit-verdict-badge ${vBadge}">${escapeHtml(vVerdict)}</span>
+                </div>
+                <table class="dd-table">
+                    <tr class="${vRow}"><th>Stan ze zdjęć</th><td class="value">${escapeHtml(item.vision_finish_condition)}${item.vision_is_render === true ? ' — zdjęcia to rendery, stan faktyczny do weryfikacji na żywo' : ''}</td></tr>
+                    ${fp.orientation ? `<tr><th>Rzut: orientacja</th><td class="value">${escapeHtml(fp.orientation)}</td></tr>` : ''}
+                    ${fp.usability_score ? `<tr><th>Rzut: ustawność</th><td class="value"><span class="num">${fp.usability_score}/10</span>${fp.room_layout_notes ? ` — ${escapeHtml(fp.room_layout_notes)}` : ''}</td></tr>` : ''}
+                    ${defects}
+                </table>
+            </div>
+        `;
+    }
+
+    // 8. Developer / KRS background check
+    let developerHtml = '';
+    if (item.developer_name || item.developer_nip || item.developer_krs || item.developer_risk_level) {
+        const devLevel = (item.developer_risk_level || 'NIEZNANE').toUpperCase();
+        const devBadge = devLevel === 'HIGH' ? 'audit-verdict-danger' : (devLevel === 'MEDIUM' ? 'audit-verdict-warning' : (devLevel === 'LOW' ? 'audit-verdict-success' : 'audit-verdict-warning'));
+        const devCls = devLevel === 'HIGH' ? 'row-danger' : (devLevel === 'MEDIUM' ? 'row-warn' : 'row-ok');
+        const devReasons = (item.developer_risk_reasons || []).map(r => `<tr class="${devLevel === 'LOW' ? 'row-ok' : 'row-warn'}"><th>Ocena</th><td class="value">${escapeHtml(r)}</td></tr>`).join('');
+        const krsLink = item.developer_krs ? `https://wyszukiwarka-krs.ms.gov.pl/` : null;
+        developerHtml = `
+            <div class="audit-block">
+                <div class="audit-block-head">
+                    <div class="audit-block-title">Deweloper / sprzedawca (KRS)</div>
+                    <span class="audit-verdict-badge ${devBadge}">${escapeHtml(devLevel)}</span>
+                </div>
+                <table class="dd-table">
+                    ${item.developer_name ? `<tr><th>Podmiot</th><td class="value">${escapeHtml(item.developer_name)}</td></tr>` : ''}
+                    ${item.developer_nip ? `<tr><th>NIP</th><td class="value"><span class="num">${escapeHtml(item.developer_nip)}</span></td></tr>` : ''}
+                    ${item.developer_krs ? `<tr><th>KRS</th><td class="value"><span class="num">${escapeHtml(item.developer_krs)}</span></td></tr>` : ''}
+                    ${item.developer_capital_pln ? `<tr><th>Kapitał zakładowy</th><td class="value"><span class="num">${Number(item.developer_capital_pln).toLocaleString('pl-PL')} zł</span></td></tr>` : ''}
+                    ${item.developer_registration_year ? `<tr><th>Rok rejestracji</th><td class="value"><span class="num">${item.developer_registration_year}</span></td></tr>` : ''}
+                    <tr class="${devCls}"><th>Poziom ryzyka</th><td class="value">${escapeHtml(devLevel)}</td></tr>
+                    ${devReasons}
+                </table>
+                ${krsLink ? `
+                <div class="audit-actions">
+                    <a href="${krsLink}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz wyszukiwarkę KRS (uzupełnij numer KRS)">
+                        ${svgIcon('external')} Wyszukiwarka KRS
+                    </a>
+                </div>` : ''}
+            </div>
+        `;
+    }
+
     return `
         ${legalHtml}
         ${tcoHtml}
         ${commuteHtml}
         ${poiHtml}
+        ${gunbHtml}
+        ${visionHtml}
+        ${developerHtml}
         ${riskHtml}
         ${gesutHtml}
     `;

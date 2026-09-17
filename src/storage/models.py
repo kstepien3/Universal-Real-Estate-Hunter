@@ -114,6 +114,36 @@ class ListingModel(Base):
     air_gios_index: Mapped[str | None] = mapped_column(String(50), nullable=True)
     air_smog_risk: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
+    # Extended Intelligence: GUNB (Building Permits)
+    _gunb_permits: Mapped[str] = mapped_column("gunb_permits", Text, default="[]")
+    _gunb_risk_flags: Mapped[str] = mapped_column("gunb_risk_flags", Text, default="[]")
+    gunb_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    gunb_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+
+    # Extended Intelligence: Vision AI
+    vision_is_render: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    vision_finish_condition: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    _vision_floorplan_details: Mapped[str] = mapped_column("vision_floorplan_details", Text, default="{}")
+    _vision_defects: Mapped[str] = mapped_column("vision_defects", Text, default="[]")
+
+    # Extended Intelligence: Commute & Pedestrian Safety
+    commute_drive_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    commute_drive_km: Mapped[float | None] = mapped_column(Float, nullable=True)
+    commute_station_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pedestrian_sidewalk: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    pedestrian_lit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    pedestrian_surface: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    pedestrian_safety_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Extended Intelligence: Developer & KRS Background Check
+    developer_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    developer_nip: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    developer_krs: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    developer_capital_pln: Mapped[float | None] = mapped_column(Float, nullable=True)
+    developer_registration_year: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    developer_risk_level: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    _developer_risk_reasons: Mapped[str] = mapped_column("developer_risk_reasons", Text, default="[]")
+
     # CRM User Actions & Status
     user_status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -311,6 +341,61 @@ class ListingModel(Base):
     @llm_json_data.setter
     def llm_json_data(self, value: dict | None):
         self._llm_json = json.dumps(value, ensure_ascii=False) if value else None
+
+    @property
+    def gunb_permits(self) -> list[dict[str, Any]]:
+        try:
+            return json.loads(self._gunb_permits) if self._gunb_permits else []
+        except Exception:
+            return []
+
+    @gunb_permits.setter
+    def gunb_permits(self, value: list[dict[str, Any]] | None):
+        self._gunb_permits = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def gunb_risk_flags(self) -> list[str]:
+        try:
+            return json.loads(self._gunb_risk_flags) if self._gunb_risk_flags else []
+        except Exception:
+            return []
+
+    @gunb_risk_flags.setter
+    def gunb_risk_flags(self, value: list[str] | None):
+        self._gunb_risk_flags = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def vision_floorplan_details(self) -> dict[str, Any] | None:
+        try:
+            return json.loads(self._vision_floorplan_details) if self._vision_floorplan_details else None
+        except Exception:
+            return None
+
+    @vision_floorplan_details.setter
+    def vision_floorplan_details(self, value: dict[str, Any] | None):
+        self._vision_floorplan_details = json.dumps(value or {}, ensure_ascii=False)
+
+    @property
+    def vision_defects(self) -> list[str]:
+        try:
+            return json.loads(self._vision_defects) if self._vision_defects else []
+        except Exception:
+            return []
+
+    @vision_defects.setter
+    def vision_defects(self, value: list[str] | None):
+        self._vision_defects = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def developer_risk_reasons(self) -> list[str]:
+        try:
+            return json.loads(self._developer_risk_reasons) if self._developer_risk_reasons else []
+        except Exception:
+            return []
+
+    @developer_risk_reasons.setter
+    def developer_risk_reasons(self, value: list[str] | None):
+        self._developer_risk_reasons = json.dumps(value or [], ensure_ascii=False)
 
 
 class PriceHistoryModel(Base):

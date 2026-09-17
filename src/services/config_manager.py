@@ -470,6 +470,9 @@ class SearchConfig(BaseModel):
     local_llm_timeout_seconds: float = 120.0
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
     cloud_llm_timeout_seconds: float = 30.0
+    # Vision AI (photo audit). Empty = auto (text-LLM chain, then OPENAI_MODEL).
+    vision_model: str = Field(default_factory=lambda: settings.VISION_MODEL or "")
+    vision_base_url: str = Field(default_factory=lambda: settings.VISION_BASE_URL or "")
     capex: CapexSettings = Field(default_factory=CapexSettings)
 
     @model_validator(mode="after")
@@ -502,6 +505,8 @@ class SearchConfig(BaseModel):
                 "local_llm_timeout_seconds",
                 "openrouter_model",
                 "cloud_llm_timeout_seconds",
+                "vision_model",
+                "vision_base_url",
                 "capex",
             )
             and hasattr(self, "profiles")
@@ -672,6 +677,11 @@ class ConfigManager:
                 pass
         if "openrouter_model" in updates and updates["openrouter_model"]:
             current_dict["openrouter_model"] = str(updates["openrouter_model"]).strip()
+        # Vision AI: empty string = auto (falls back to the text-LLM chain)
+        if "vision_model" in updates and updates["vision_model"] is not None:
+            current_dict["vision_model"] = str(updates["vision_model"]).strip()
+        if "vision_base_url" in updates and updates["vision_base_url"] is not None:
+            current_dict["vision_base_url"] = str(updates["vision_base_url"]).strip().rstrip("/")
         if "cloud_llm_timeout_seconds" in updates and updates["cloud_llm_timeout_seconds"] is not None:
             try:
                 current_dict["cloud_llm_timeout_seconds"] = max(5.0, float(updates["cloud_llm_timeout_seconds"]))
@@ -773,6 +783,8 @@ class ConfigManager:
                 "local_llm_timeout_seconds",
                 "openrouter_model",
                 "cloud_llm_timeout_seconds",
+                "vision_model",
+                "vision_base_url",
             )
         }
         if flat_keys and current_dict.get("profiles"):

@@ -843,6 +843,13 @@
             if (document.getElementById('cfgOpenRouterModel')) {
                 document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
             }
+            if (document.getElementById('cfgVisionModel')) {
+                document.getElementById('cfgVisionModel').value = activeConfig.vision_model || '';
+                if (typeof syncVisionModelSelectWithInput === 'function') syncVisionModelSelectWithInput(activeConfig.vision_model || '');
+            }
+            if (document.getElementById('cfgVisionBaseUrl')) {
+                document.getElementById('cfgVisionBaseUrl').value = activeConfig.vision_base_url || '';
+            }
 
             const capex = activeConfig.capex || {};
             if (document.getElementById('cfgCapexDeveloper')) {
@@ -1125,7 +1132,9 @@
                 ollama_timeout_seconds: localTimeout,
                 ollama_temperature: localTemp,
                 ollama_num_ctx: localCtx,
-                openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro'
+                openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro',
+                vision_model: document.getElementById('cfgVisionModel')?.value?.trim() || '',
+                vision_base_url: document.getElementById('cfgVisionBaseUrl')?.value?.trim() || ''
             };
 
             try {
@@ -3107,6 +3116,65 @@
                 input.value = modelName;
             }
         }
+        function onVisionModelSelectChange(val) {
+            const inp = document.getElementById('cfgVisionModel');
+            if (!inp) return;
+            if (val !== 'custom') {
+                inp.value = val;
+            } else {
+                inp.focus();
+                inp.select();
+            }
+        }
+        function onVisionModelInputCustom(val) {
+            syncVisionModelSelectWithInput(val);
+        }
+        function syncVisionModelSelectWithInput(modelName) {
+            const sel = document.getElementById('cfgVisionModelSelect');
+            if (!sel) return;
+            const v = (modelName || '').trim();
+            let found = false;
+            for (let i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value === v) {
+                    sel.selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && v) {
+                sel.value = 'custom';
+            }
+        }
+        function setVisionModelChip(modelName) {
+            const input = document.getElementById('cfgVisionModel');
+            if (input) {
+                input.value = modelName;
+            }
+            syncVisionModelSelectWithInput(modelName);
+        }
+        function setVisionBaseUrlChip(url) {
+            const input = document.getElementById('cfgVisionBaseUrl');
+            if (input) {
+                input.value = url;
+            }
+        }
+        function updateVisionModelSelectOptions(installedModels, currentVal) {
+            const sel = document.getElementById('cfgVisionModelSelect');
+            if (!sel) return;
+            const defaults = ['', 'qwen2.5vl:7b', 'llama3.2-vision:11b', 'minicpm-v:8b', 'moondream', 'google/gemini-2.0-flash-001', 'gpt-4o-mini', 'gpt-4o'];
+            const allModels = Array.from(new Set([...(installedModels || []), ...defaults]));
+            const cur = currentVal ?? document.getElementById('cfgVisionModel')?.value?.trim() ?? '';
+            let html = allModels.map(m => {
+                const label = m === '' ? 'Auto (dopasowany do dostawcy LLM · lokalnie: qwen2.5vl:7b · chmura)' : m;
+                const isInst = (installedModels || []).includes(m);
+                const tag = isInst ? ' (wykryty)' : '';
+                return `<option value="${escapeHtml(m)}">${escapeHtml(label)}${tag}</option>`;
+            }).join('');
+            html += '<option value="custom">Inny model wizyjny / wpisany ręcznie...</option>';
+            sel.innerHTML = html;
+            syncVisionModelSelectWithInput(cur);
+        }
+
 
         function updateLocalModelSelectOptions(installedModels, currentVal) {
             const sel = document.getElementById('cfgLocalModelSelect') || document.getElementById('cfgOllamaModelSelect');
@@ -3209,6 +3277,12 @@
             ];
             if (detectedModels.length > 0) {
                 updateLocalModelSelectOptions(detectedModels, document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim());
+            }
+
+            // Vision select: only models the backend flagged as vision-capable
+            const detectedVision = data.installed_vision_models || [];
+            if (detectedVision.length > 0) {
+                updateVisionModelSelectOptions(detectedVision, document.getElementById('cfgVisionModel')?.value?.trim());
             }
 
             // Update OpenRouter key notice
@@ -3379,6 +3453,30 @@
                 } else {
                     visibleRows.push(localAiRow);
                 }
+            }
+
+            if (data.vision_target) {
+                const vt = data.vision_target;
+                const vBadge = vt.ready
+                    ? '<span class="llm-provider-badge ok">Gotowy</span>'
+                    : '<span class="llm-provider-badge warn">Brak klucza / silnika</span>';
+                const vDot = vt.ready ? 'ok' : 'warn';
+                const vRow = `
+                    <div class="llm-provider-row">
+                        <div class="llm-provider-main">
+                            <div class="llm-provider-title-row">
+                                <span class="llm-dot ${vDot}"></span>
+                                <span class="llm-provider-name">Vision AI (audyt zdjęć)</span>
+                                <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(vt.model || 'auto')})</span>
+                                ${vBadge}
+                            </div>
+                            <div class="llm-provider-msg">
+                                Serwer: <code>${escapeHtml(vt.base_url || 'auto')}</code> · ${vt.ready ? (vt.is_local ? 'Lokalny silnik wizyjny gotowy' : 'Połączenie z modelem aktywne') : 'Wymaga klucza API w .env lub uruchomionej lokalnej Ollamy'}
+                            </div>
+                        </div>
+                    </div>
+                `;
+                visibleRows.push(vRow);
             }
 
             container.innerHTML = `

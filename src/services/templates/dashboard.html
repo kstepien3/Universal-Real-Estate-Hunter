@@ -1019,6 +1019,54 @@
                         </div>
                     </div>
 
+                    <!-- Vision AI (audyt zdjęć: rendery, stan wykończenia, rzuty, wady) -->
+                    <div class="config-field" style="margin-top:14px;">
+                        <label style="margin-bottom:6px;">Vision AI — model do audytu zdjęć ofert (niezależny od modelu tekstowego):</label>
+                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
+                            Modele tekstowe (qwen2.5, bielik…) nie analizują zdjęć — lista zawiera wyłącznie modele multimodalne.
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                            <select id="cfgVisionModelSelect" style="flex:1;" onchange="onVisionModelSelectChange(this.value)">
+                                <option value="">Auto (dopasowany do dostawcy LLM · lokalnie: qwen2.5vl:7b · chmura)</option>
+                                <option value="qwen2.5vl:7b">qwen2.5vl:7b — Ollama, zalecany (6.0 GB)</option>
+                                <option value="llama3.2-vision:11b">llama3.2-vision:11b — Ollama, precyzyjny (8.0 GB)</option>
+                                <option value="minicpm-v:8b">minicpm-v:8b — Ollama, rzuty i OCR (8.0 GB)</option>
+                                <option value="moondream">moondream — Ollama, lekki CPU (1.7 GB)</option>
+                                <option value="google/gemini-2.0-flash-001">google/gemini-2.0-flash-001 — OpenRouter (szybki, multimodalny)</option>
+                                <option value="gpt-4o-mini">gpt-4o-mini — OpenAI API (chmura)</option>
+                                <option value="gpt-4o">gpt-4o — OpenAI API (chmura, dokładniejszy)</option>
+                                <option value="custom">Inny model wizyjny / wpisany ręcznie...</option>
+                            </select>
+                        </div>
+                        <div class="config-input-chips-group">
+                            <input type="text" id="cfgVisionModel" placeholder="Auto albo np. qwen2.5vl:7b / gpt-4o-mini" class="config-chips-input" oninput="onVisionModelInputCustom(this.value)">
+                            <div class="config-chips-btns">
+                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('qwen2.5vl:7b')">qwen2.5vl:7b</button>
+                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('llama3.2-vision:11b')">llama3.2-vision</button>
+                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('google/gemini-2.0-flash-001')">gemini-flash</button>
+                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('gpt-4o-mini')">gpt-4o-mini</button>
+                            </div>
+                        </div>
+                        <div class="config-row2" style="margin-top:8px;">
+                            <div class="config-field">
+                                <label for="cfgVisionBaseUrl">Adres serwera Vision (Base URL, puste = auto wg modelu):</label>
+                                <div class="config-input-chips-group">
+                                    <input type="text" id="cfgVisionBaseUrl" placeholder="Puste = auto (np. Ollama dla modeli lokalnych, OpenRouter dla modeli z /)" class="config-chips-input">
+                                    <div class="config-chips-btns">
+                                        <button type="button" class="btn btn-sm" onclick="setVisionBaseUrlChip('http://localhost:11434')">Lokalna Ollama</button>
+                                        <button type="button" class="btn btn-sm" onclick="setVisionBaseUrlChip('https://openrouter.ai/api/v1')">OpenRouter</button>
+                                        <button type="button" class="btn btn-sm" onclick="setVisionBaseUrlChip('')">Auto</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                            Puste Base URL = auto (silnik lokalny gdy aktywny dostawca lokalny, OpenRouter lub OpenAI). API chmurowe wymaga klucza w .env (VISION_API_KEY, OPENROUTER_API_KEY lub OPENAI_API_KEY); Ollama nie wymaga klucza.<br>
+                            Zdjęcia ofertowe są automatycznie skalowane do optymalnej rozdzielczości przed wysłaniem do modelu wizyjnego.<br>
+                            Kliknij „Sprawdź połączenie” poniżej — wykryte lokalnie modele wizyjne pojawią się na liście powyżej.
+                        </div>
+                    </div>
+
                     <!-- Diagnostyka połączenia LLM -->
                     <div class="llm-diag-section">
                         <div class="llm-diag-header">

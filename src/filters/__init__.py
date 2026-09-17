@@ -27,6 +27,13 @@ from .fingerprint import (
 from .llm_analyzer import PROMPT_VERSION, SUGGESTED_OLLAMA_MODELS, LLMAnalyzer, estimate_tokens, load_prompt_template
 from .stage1_hard_rules import Stage1Filter
 from .stage2_semantic import Stage2SemanticFilter
+from .vision_analyzer import (
+    SUGGESTED_OLLAMA_VISION_MODELS,
+    declared_finish_label,
+    is_local_vision_base,
+    is_vision_model,
+    resolve_vision_target,
+)
 
 
 class QualificationEngine:
@@ -381,6 +388,73 @@ class QualificationEngine:
             p_area = geo_audit.get("cadastral_area")
             if p_num and p_area:
                 pros.append(f"Zidentyfikowano działkę w Geoportalu: nr {p_num} ({p_area} m²)")
+
+        # GUNB building-permit intelligence (200 m radius)
+        gunb_flags = list(getattr(listing, "gunb_risk_flags", None) or [])
+        if gunb_flags:
+            for flag in gunb_flags[:3]:
+                cons.append(flag)
+            score -= 20.0
+        elif list(getattr(listing, "gunb_permits", None) or []):
+            pros.append("🏛️ Rejestr GUNB/RWDZ: wyłącznie standardowe pozwolenia w promieniu 200 m")
+
+        # Vision AI (Living Quarters verification from photos)
+        if getattr(listing, "vision_is_render", None) is True:
+            cons.append(
+                "🖼️ [Vision AI] Zdjęcia ofertowe to wizualizacje 3D / rendery — stan faktyczny wymaga weryfikacji na żywo"
+            )
+            score -= 10.0
+        vision_finish = getattr(listing, "vision_finish_condition", None)
+        if vision_finish and vision_finish != "NIEZNANY":
+            declared = declared_finish_label(listing) or ""
+            if "ZAMIESZKANI" in declared.upper() and vision_finish in ("DO_WYKONCZENIA", "DEWELOPERSKI", "SUROWY"):
+                cons.append(
+                    f"🔍 [Vision AI] Niespójność stanu: deklarowano '{declared}', a zdjęcia wskazują '{vision_finish}'"
+                )
+                score -= 15.0
+        for defect in list(getattr(listing, "vision_defects", None) or [])[:3]:
+            cons.append(f"🔧 [Vision AI] Wada wizualna: {defect}")
+
+        # Commute & pedestrian safety (OSRM + OSM Overpass)
+        drive_min = getattr(listing, "commute_drive_min", None)
+        if drive_min is not None and drive_min > 35:
+            cons.append(f"🚗 Długi dojazd do centrum ({drive_min} min samochodem) — lokalizacja wymagająca samochodu")
+            score -= 5.0
+        if getattr(listing, "pedestrian_sidewalk", None) is False:
+            cons.append(
+                f"🚶 Brak wydzielonego chodnika: {getattr(listing, 'pedestrian_safety_note', None) or 'ruch pieszy poboczem/jezdnią'}"
+            )
+            score -= 5.0
+        elif getattr(listing, "pedestrian_sidewalk", None) is True:
+            pros.append("🚶 Bezpieczny dostęp pieszy (chodnik potwierdzony w OSM)")
+
+        # Developer / KRS background check
+        dev_level = (getattr(listing, "developer_risk_level", None) or "").upper()
+        dev_reasons = list(getattr(listing, "developer_risk_reasons", None) or [])
+        if dev_level == "HIGH":
+            for reason in dev_reasons[:3]:
+                cons.append(f"⚖️ [KRS] {reason}")
+            score -= 25.0
+        elif dev_level == "MEDIUM":
+            for reason in dev_reasons[:2]:
+                cons.append(f"⚖️ [KRS] {reason}")
+            score -= 10.0
+        elif dev_level == "LOW" and dev_reasons:
+            pros.append(f"✅ [KRS] Wiarygodny podmiot: {dev_reasons[-1].strip()}"[:200])
+
+        # POI daily infrastructure (Overpass 15-minute city)
+        nearest_poi = getattr(listing, "nearest_poi", None) or {}
+        if isinstance(nearest_poi, dict) and nearest_poi:
+            far_poi: list[str] = []
+            poi_labels = {"edukacja": "szkoła/przedszkole", "sklepy": "market spożywczy", "transport": "przystanek"}
+            for cat, label in poi_labels.items():
+                near = nearest_poi.get(cat) or {}
+                poi_walk_min = near.get("walk_min")
+                if isinstance(poi_walk_min, (int, float)) and poi_walk_min > 20:
+                    far_poi.append(f"{label} (~{int(poi_walk_min)} min pieszo)")
+            if far_poi:
+                cons.append(f"🏪 Odległa infrastruktura codzienna: {', '.join(far_poi)}")
+                score -= 5.0
 
         return score, pros, cons
 
@@ -847,6 +921,11 @@ __all__ = [
     "estimate_llm_tokens",
     "PROMPT_VERSION",
     "SUGGESTED_OLLAMA_MODELS",
+    "SUGGESTED_OLLAMA_VISION_MODELS",
+    "declared_finish_label",
+    "is_local_vision_base",
+    "is_vision_model",
+    "resolve_vision_target",
     "estimate_tokens",
     "load_prompt_template",
 ]
