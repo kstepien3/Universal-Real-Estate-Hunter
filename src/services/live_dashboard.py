@@ -591,24 +591,7 @@ class LiveDashboardServer:
         from src.filters.llm_analyzer import LLMAnalyzer
 
         cfg = config_manager.get_config()
-        analyzer = LLMAnalyzer(
-            enabled=cfg.llm_analysis_enabled,
-            ollama_model=getattr(cfg, "ollama_model", None),
-            ollama_base_url=getattr(cfg, "ollama_base_url", None),
-            ollama_timeout_seconds=getattr(cfg, "ollama_timeout_seconds", None),
-            ollama_temperature=getattr(cfg, "ollama_temperature", None),
-            ollama_num_ctx=getattr(cfg, "ollama_num_ctx", None),
-            local_llm_base_url=getattr(cfg, "local_llm_base_url", None),
-            local_llm_model=getattr(cfg, "local_llm_model", None),
-            local_llm_api_key=getattr(cfg, "local_llm_api_key", None),
-            local_llm_temperature=getattr(cfg, "local_llm_temperature", None),
-            local_llm_timeout_seconds=getattr(cfg, "local_llm_timeout_seconds", None),
-            local_llm_preset=getattr(cfg, "local_llm_preset", None),
-            local_llm_num_ctx=getattr(cfg, "local_llm_num_ctx", None),
-            cloud_llm_timeout_seconds=getattr(cfg, "cloud_llm_timeout_seconds", None),
-            openrouter_model=getattr(cfg, "openrouter_model", None),
-            llm_provider=getattr(cfg, "llm_provider", None),
-        )
+        analyzer = LLMAnalyzer.from_config(cfg)
         res = await analyzer.test_connection()
         return web.json_response(res)
 
@@ -689,32 +672,24 @@ class LiveDashboardServer:
             except Exception:
                 pass
 
-        analyzer = LLMAnalyzer(
-            enabled=cfg.llm_analysis_enabled,
-            ollama_model=ollama_model or getattr(cfg, "ollama_model", None),
-            ollama_base_url=ollama_base_url or getattr(cfg, "ollama_base_url", None),
-            ollama_timeout_seconds=ollama_timeout_seconds or getattr(cfg, "ollama_timeout_seconds", None),
-            ollama_temperature=ollama_temperature
-            if ollama_temperature is not None
-            else getattr(cfg, "ollama_temperature", None),
-            ollama_num_ctx=ollama_num_ctx if ollama_num_ctx is not None else getattr(cfg, "ollama_num_ctx", None),
-            local_llm_base_url=local_llm_base_url or getattr(cfg, "local_llm_base_url", None),
-            local_llm_model=local_llm_model if local_llm_model is not None else getattr(cfg, "local_llm_model", None),
-            local_llm_api_key=local_llm_api_key
-            if local_llm_api_key is not None
-            else getattr(cfg, "local_llm_api_key", None),
-            local_llm_temperature=local_llm_temperature
-            if local_llm_temperature is not None
-            else getattr(cfg, "local_llm_temperature", None),
-            local_llm_timeout_seconds=local_llm_timeout_seconds or getattr(cfg, "local_llm_timeout_seconds", None),
-            local_llm_preset=local_llm_preset or getattr(cfg, "local_llm_preset", None),
-            local_llm_num_ctx=local_llm_num_ctx
-            if local_llm_num_ctx is not None
-            else getattr(cfg, "local_llm_num_ctx", None),
-            cloud_llm_timeout_seconds=cloud_llm_timeout_seconds or getattr(cfg, "cloud_llm_timeout_seconds", None),
-            openrouter_model=openrouter_model or getattr(cfg, "openrouter_model", None),
-            llm_provider=llm_provider or getattr(cfg, "llm_provider", None),
-        )
+        overrides = {
+            "ollama_model": ollama_model,
+            "ollama_base_url": ollama_base_url,
+            "ollama_timeout_seconds": ollama_timeout_seconds,
+            "ollama_temperature": ollama_temperature,
+            "ollama_num_ctx": ollama_num_ctx,
+            "local_llm_base_url": local_llm_base_url,
+            "local_llm_model": local_llm_model,
+            "local_llm_api_key": local_llm_api_key,
+            "local_llm_temperature": local_llm_temperature,
+            "local_llm_timeout_seconds": local_llm_timeout_seconds,
+            "local_llm_preset": local_llm_preset,
+            "local_llm_num_ctx": local_llm_num_ctx,
+            "cloud_llm_timeout_seconds": cloud_llm_timeout_seconds,
+            "openrouter_model": openrouter_model,
+            "llm_provider": llm_provider,
+        }
+        analyzer = LLMAnalyzer.from_config(cfg, **overrides)
         res = await analyzer.test_connection()
         return web.json_response(res)
 

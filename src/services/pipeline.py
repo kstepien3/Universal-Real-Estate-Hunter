@@ -11,9 +11,9 @@ from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.listing import (
     AIR_FIELDS,
     GEO_FIELDS,
-    SPATIAL_FIELDS,
     ListingSchema,
     apply_if_present,
+    copy_spatial_fields,
     restore_cached_details,
 )
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
@@ -27,6 +27,98 @@ from src.storage import ListingModel, ListingRepository, get_session, init_db, s
 
 def _should_notify(*, is_qualified: bool, is_new: bool, is_duplicate: bool, price_changed: bool) -> bool:
     return is_qualified and ((is_new and not is_duplicate) or price_changed)
+
+
+async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
+    """Audit location via Geoportal and Air Quality, mapping returned fields onto target.
+
+    Supports both ListingSchema and ListingModel objects.
+    Returns the geo_audit dict if successful, or None.
+    """
+    coords = getattr(target, "coordinates", None)
+    if not coords and getattr(target, "latitude", None) is not None and getattr(target, "longitude", None) is not None:
+        coords = (target.latitude, target.longitude)
+    if not coords:
+        return None
+
+    from src.services.air_quality import air_quality_service
+    from src.services.geoportal import geoportal_service
+
+    category = getattr(target, "category", "dom")
+    if hasattr(category, "value"):
+        category = category.value
+
+    geo_coro = geoportal_service.audit_location(
+        coords[0],
+        coords[1],
+        radius_meters=120,
+        category=category or "dom",
+    )
+    aq_coro = air_quality_service.get_air_quality_audit(
+        coords[0],
+        coords[1],
+    )
+    geo_res: Any
+    aq_res: Any
+    geo_res, aq_res = await asyncio.gather(geo_coro, aq_coro, return_exceptions=True)
+
+    geo_audit: dict[str, Any] | None = None
+    if isinstance(geo_res, dict):
+        geo_audit = geo_res
+        if geo_audit.get("main_parcel_id"):
+            if not getattr(target, "parcel_id", None):
+                target.parcel_id = geo_audit["main_parcel_id"]
+            target.cadastral_area = geo_audit.get("cadastral_area")
+            target.geoportal_url = geo_audit.get("geoportal_url")
+            target.mpzp_zone = geo_audit.get("mpzp_zone")
+            target.mpzp_status = geo_audit.get("mpzp_status")
+            target.flood_risk_zone = geo_audit.get("flood_risk_zone")
+
+        apply_if_present(target, geo_audit, GEO_FIELDS)
+
+        if (v := geo_audit.get("gesut_networks")) is not None:
+            if hasattr(target, "gesut_networks"):
+                target.gesut_networks = v
+            if hasattr(target, "gesut_networks_data"):
+                target.gesut_networks_data = v
+
+    if isinstance(aq_res, dict):
+        apply_if_present(target, aq_res, AIR_FIELDS)
+        if hasattr(target, "air_smog_risk") and getattr(target, "air_smog_risk", None) is None:
+            target.air_smog_risk = "NIEZNANE"
+
+    return geo_audit
+
+
+def _log_spatial_summary(target: Any, prefix: str | None = None) -> None:
+    parts = []
+    pid = getattr(target, "parcel_id", None)
+    if pid:
+        parts.append(f"działka {pid.rsplit('.', 1)[-1]}")
+    bb = getattr(target, "broadband_status", None)
+    if bb:
+        parts.append(f"FTTH: {bb}")
+    slope = getattr(target, "terrain_slope_pct", None)
+    if slope is not None:
+        parts.append(f"stok: {slope:.1f}%")
+    pka = getattr(target, "walkability_pka_name", None)
+    if pka:
+        parts.append(f"PKA: {pka}")
+    aqi = getattr(target, "air_aqi", None)
+    if aqi is not None:
+        parts.append(f"AQI: {aqi}")
+    pm25 = getattr(target, "air_pm25_heating_avg", None)
+    if pm25 is not None:
+        parts.append(f"PM2.5 zima: {pm25:.0f} µg/m³")
+
+    title = getattr(target, "title", "") or ""
+    header = prefix or f"🏛️ [Rejestry] {title[:25]}"
+    if parts:
+        global_tracker.add_log(
+            f"{header}: " + " | ".join(parts),
+            level="info",
+            category="geo",
+        )
 
 
 class ScraperPipeline:
@@ -185,61 +277,9 @@ class ScraperPipeline:
             )
             if listing.coordinates and is_exact_coords and needs_spatial_audit:
                 try:
-                    from src.services.air_quality import air_quality_service
-                    from src.services.geoportal import geoportal_service
-
-                    geo_coro = geoportal_service.audit_location(
-                        listing.coordinates[0],
-                        listing.coordinates[1],
-                        radius_meters=120,
-                        category=getattr(listing, "category", "dom"),
-                    )
-                    aq_coro = air_quality_service.get_air_quality_audit(
-                        listing.coordinates[0],
-                        listing.coordinates[1],
-                    )
-                    geo_res: Any
-                    aq_res: Any
-                    geo_res, aq_res = await asyncio.gather(geo_coro, aq_coro, return_exceptions=True)
-                    if isinstance(geo_res, dict):
-                        geo_audit = geo_res
-                        if geo_audit.get("main_parcel_id"):
-                            listing.parcel_id = geo_audit["main_parcel_id"]
-                            listing.cadastral_area = geo_audit.get("cadastral_area")
-                            listing.geoportal_url = geo_audit.get("geoportal_url")
-                            listing.mpzp_zone = geo_audit.get("mpzp_zone")
-                            listing.mpzp_status = geo_audit.get("mpzp_status")
-                            listing.flood_risk_zone = geo_audit.get("flood_risk_zone")
-                        apply_if_present(listing, geo_audit, GEO_FIELDS)
-                        if (v := geo_audit.get("gesut_networks")) is not None:
-                            listing.gesut_networks = v
-                    else:
-                        geo_audit = None
-
-                    if isinstance(aq_res, dict):
-                        apply_if_present(listing, aq_res, AIR_FIELDS)
-
-                    # Log summary of spatial audit
-                    parts = []
-                    if listing.parcel_id:
-                        p_short = listing.parcel_id.split(".")[-1] if "." in listing.parcel_id else listing.parcel_id
-                        parts.append(f"działka {p_short}")
-                    if listing.broadband_status:
-                        parts.append(f"FTTH: {listing.broadband_status}")
-                    if listing.terrain_slope_pct is not None:
-                        parts.append(f"stok: {listing.terrain_slope_pct:.1f}%")
-                    if listing.walkability_pka_name:
-                        parts.append(f"PKA: {listing.walkability_pka_name}")
-                    if listing.air_aqi is not None:
-                        parts.append(f"AQI: {listing.air_aqi}")
-                    if listing.air_pm25_heating_avg is not None:
-                        parts.append(f"PM2.5 zima: {listing.air_pm25_heating_avg:.0f} µg/m³")
-                    if parts:
-                        global_tracker.add_log(
-                            f"🏛️ [Rejestry] {listing.title[:25]}: " + " | ".join(parts),
-                            level="info",
-                            category="geo",
-                        )
+                    geo_audit = await audit_and_apply_spatial_data(listing)
+                    if geo_audit:
+                        _log_spatial_summary(listing)
                 except Exception as e:
                     logger.debug(f"[Pipeline] Geoportal/AirQuality audit skipped: {e}")
 
@@ -323,22 +363,19 @@ class ScraperPipeline:
             if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
                 filter_result.worth_interest = existing_model.worth_interest
 
-        # Ensure spatial fields and scoring are applied if not already on the result
-        if filter_result.is_qualified and not filter_result.mpzp_zone and listing.mpzp_zone:
-            res_spatial = self.engine.apply_spatial_findings(
+        # Apply spatial findings if not already reflected on qualified result
+        if filter_result.is_qualified and not filter_result.mpzp_zone and (geo_audit or listing.mpzp_zone):
+            new_score, new_pros, new_cons = self.engine.apply_spatial_findings(
                 listing=listing,
                 score=filter_result.score,
                 pros=filter_result.pros,
                 cons=filter_result.cons,
                 geo_audit=geo_audit,
             )
-            if asyncio.iscoroutine(res_spatial):
-                res_spatial = await res_spatial
-            new_score, new_pros, new_cons = res_spatial
             filter_result.score = min(100.0, max(0.0, new_score))
             filter_result.pros = new_pros
             filter_result.cons = new_cons
-            apply_if_present(filter_result, listing, SPATIAL_FIELDS)
+            copy_spatial_fields(filter_result, listing)
             filter_result.mpzp_zone = listing.mpzp_zone
             filter_result.flood_risk_zone = listing.flood_risk_zone
 
@@ -403,11 +440,6 @@ class ScraperPipeline:
         )
 
         if should_notify and db_model.notified_at is None:
-            logger.info(
-                f"[Pipeline] Alerting on qualified offer: {listing.title} "
-                f"[{filter_result.status.value}] (Score: {filter_result.score:.1f})"
-            )
-            # Calculate market negotiation advice
             if market_medians is None:
                 market_medians = await repo.get_market_medians()
             valuation_intel = valuation_engine.evaluate(
@@ -415,15 +447,14 @@ class ScraperPipeline:
                 filter_result=filter_result,
                 market_medians=market_medians,
             )
-            advice = valuation_intel.negotiation
-
             webhook_url = getattr(profile, "discord_webhook_url", None)
-            discord_ok = await self.discord.send_notification(
-                listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice
+            notified = await self._send_listing_notifications(
+                listing=listing,
+                filter_result=filter_result,
+                advice=valuation_intel.negotiation,
+                webhook_url=webhook_url,
             )
-            telegram_ok = await self.telegram.send_notification(listing, filter_result, negotiation_advice=advice)
-
-            if discord_ok or telegram_ok:
+            if notified:
                 await repo.mark_as_notified(db_model.id)
                 result["notified"] = True
 
@@ -485,7 +516,14 @@ class ScraperPipeline:
                     )
         if not notify_jobs:
             return
-        sent = await asyncio.gather(*[self._send_listing_notifications(job) for job in notify_jobs])
+        sent = await asyncio.gather(
+            *[
+                self._send_listing_notifications(
+                    job["listing"], job["filt"], job["advice"], webhook_url=job["webhook_url"]
+                )
+                for job in notify_jobs
+            ]
+        )
         marked_ids: list[int] = []
         for job, ok in zip(notify_jobs, sent, strict=True):
             if ok:
@@ -497,18 +535,22 @@ class ScraperPipeline:
                 for listing_id in marked_ids:
                     await repo.mark_as_notified(listing_id)
 
-    async def _send_listing_notifications(self, job: dict[str, Any]) -> bool:
+    async def _send_listing_notifications(
+        self,
+        listing: Any,
+        filter_result: Any,
+        advice: Any,
+        webhook_url: str | None = None,
+    ) -> bool:
         """Deliver Discord + Telegram alerts for one qualified listing."""
         logger.info(
-            f"[Pipeline] Alerting on qualified offer: {job['listing'].title} "
-            f"[{job['filt'].status.value}] (Score: {job['filt'].score:.1f})"
+            f"[Pipeline] Alerting on qualified offer: {listing.title} "
+            f"[{filter_result.status.value}] (Score: {filter_result.score:.1f})"
         )
         discord_ok = await self.discord.send_notification(
-            job["listing"], job["filt"], webhook_url=job["webhook_url"], negotiation_advice=job["advice"]
+            listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice
         )
-        telegram_ok = await self.telegram.send_notification(
-            job["listing"], job["filt"], negotiation_advice=job["advice"]
-        )
+        telegram_ok = await self.telegram.send_notification(listing, filter_result, negotiation_advice=advice)
         return bool(discord_ok or telegram_ok)
 
     async def run_cycle(self, target_profile: str | None = None) -> dict:
@@ -840,9 +882,7 @@ class ScraperPipeline:
         (SIDUSIS FTTH, ULDK OBB parcel geometry, GUGiK NMT slope/aspect, PKA walkability, power lines).
         Also geocodes any listings missing coordinates.
         """
-        from src.services.air_quality import air_quality_service
         from src.services.geocoder import geocoder
-        from src.services.geoportal import geoportal_service
 
         # 1. Geocode listings missing coordinates
         missing_coords_stmt = (
@@ -912,124 +952,22 @@ class ScraperPipeline:
             global_tracker._sync_shared_status()
 
             try:
-                assert item.latitude is not None and item.longitude is not None
-                geo_coro = geoportal_service.audit_location(
-                    item.latitude,
-                    item.longitude,
-                    radius_meters=120,
-                    category=getattr(item, "category", "dom"),
+                geo_audit = await audit_and_apply_spatial_data(item) or {}
+
+                score, item.pros, item.cons = self.engine.apply_spatial_findings(
+                    listing=item,
+                    score=float(item.qualification_score or 50.0),
+                    pros=list(item.pros or []),
+                    cons=list(item.cons or []),
+                    geo_audit=geo_audit,
                 )
-                aq_coro = air_quality_service.get_air_quality_audit(
-                    item.latitude,
-                    item.longitude,
-                )
-                geo_res: Any
-                aq_res: Any
-                geo_res, aq_res = await asyncio.gather(geo_coro, aq_coro, return_exceptions=True)
-                geo_audit = geo_res if isinstance(geo_res, dict) else {}
-
-                if geo_audit.get("main_parcel_id") and not item.parcel_id:
-                    item.parcel_id = geo_audit["main_parcel_id"]
-                    item.cadastral_area = geo_audit.get("cadastral_area")
-                    item.geoportal_url = geo_audit.get("geoportal_url")
-                    item.mpzp_zone = geo_audit.get("mpzp_zone")
-                    item.mpzp_status = geo_audit.get("mpzp_status")
-                    item.flood_risk_zone = geo_audit.get("flood_risk_zone")
-
-                apply_if_present(item, geo_audit, GEO_FIELDS)
-
-                if geo_audit.get("gesut_networks"):
-                    item.gesut_networks_data = geo_audit["gesut_networks"]
-
-                if isinstance(aq_res, dict):
-                    apply_if_present(item, aq_res, AIR_FIELDS)
-                    if item.air_smog_risk is None:
-                        item.air_smog_risk = "NIEZNANE"
-
-                item_pros = list(item.pros or [])
-                item_cons = list(item.cons or [])
-                score_mod = 0.0
-
-                if item.broadband_status == "ŚWIATŁOWÓD_AKTYWNY" and not any(
-                    "światłowód" in p.lower() for p in item_pros
-                ):
-                    item_pros.append("🌐 Światłowód aktywny FTTH (potwierdzony w SIDUSIS internet.gov.pl)")
-                    score_mod += 5.0
-                elif item.broadband_status in ("BRAK", "BRAK_ZASIĘGU") and not any(
-                    "brak stacjonarnego internetu" in c.lower() for c in item_cons
-                ):
-                    item_cons.append(
-                        "⚠️ Brak stacjonarnego internetu szerokopasmowego (SIDUSIS): Konieczność łączności LTE/5G lub Starlink"
-                    )
-                    score_mod -= 5.0
-
-                if item.parcel_front_width_m is not None:
-                    if item.parcel_front_width_m < 16.0 and not any("wąski front" in c.lower() for c in item_cons):
-                        item_cons.append(
-                            f"📐 Wąski front działki ({item.parcel_front_width_m:.1f} m < 16 m): Restrykcje odległościowe Prawa Budowlanego"
-                        )
-                        score_mod -= 15.0
-                    elif (
-                        item.parcel_shape_type == "REGULARNY"
-                        and item.parcel_front_width_m >= 18.0
-                        and not any("foremna działka" in p.lower() for p in item_pros)
-                    ):
-                        item_pros.append(f"📐 Foremna działka: szerokość frontu {item.parcel_front_width_m:.0f} m")
-
-                if item.terrain_slope_pct is not None:
-                    if item.terrain_slope_pct > 8.0 and not any("strome nachylenie" in c.lower() for c in item_cons):
-                        item_cons.append(
-                            f"⛰️ Strome nachylenie terenu (spadek {item.terrain_slope_pct:.1f}%): Ryzyko murów oporowych i spływu wód"
-                        )
-                        score_mod -= 15.0
-                    elif (
-                        item.terrain_aspect in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI")
-                        and item.terrain_slope_pct >= 2.0
-                        and not any("południowa ekspozycja" in p.lower() for p in item_pros)
-                    ):
-                        item_pros.append(
-                            f"☀️ Południowa ekspozycja stoku (spadek {item.terrain_slope_pct:.1f}%) — doskonałe nasłonecznienie pod fotowoltaikę"
-                        )
-
-                if (
-                    item.power_lines_risk
-                    and any(k in item.power_lines_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN"))
-                    and not any("wysokiego napięcia" in c.lower() for c in item_cons)
-                ):
-                    item_cons.append(f"⚡ Sąsiedztwo napowietrznej linii wysokiego napięcia ({item.power_lines_risk})")
-                    score_mod -= 20.0
-
-                if (
-                    item.walkability_pka_dist_m is not None
-                    and item.walkability_pka_dist_m <= 1500
-                    and not any("stacja kolejowa pka" in p.lower() for p in item_pros)
-                ):
-                    item_pros.append(
-                        f"🚆 Stacja kolejowa PKA ({item.walkability_pka_name or 'PKA'}: {item.walkability_pka_dist_m} m)"
-                    )
-                    score_mod += 5.0
-
-                item.pros = item_pros
-                item.cons = item_cons
-                if score_mod != 0.0 and item.qualification_score is not None:
-                    item.qualification_score = max(0.0, min(150.0, item.qualification_score + score_mod))
+                if item.qualification_score is not None:
+                    item.qualification_score = min(100.0, max(0.0, score))
 
                 item.updated_at = datetime.now(UTC)
                 updated_count += 1
                 await safe_commit(session)
-                parts = []
-                if item.parcel_id:
-                    p_short = item.parcel_id.split(".")[-1] if "." in item.parcel_id else item.parcel_id
-                    parts.append(f"działka {p_short}")
-                if item.broadband_status:
-                    parts.append(f"FTTH: {item.broadband_status}")
-                if item.terrain_slope_pct is not None:
-                    parts.append(f"stok: {item.terrain_slope_pct:.1f}%")
-                global_tracker.add_log(
-                    f"🏛️ [Backfill] #{item.id} {item.title[:25]}: " + (", ".join(parts) or "zaktualizowano"),
-                    level="info",
-                    category="geo",
-                )
+                _log_spatial_summary(item, prefix=f"🏛️ [Backfill] #{item.id}")
             except Exception as e:
                 logger.debug(f"[Pipeline] Backfill spatial audit error for #{item.id}: {e}")
                 try:

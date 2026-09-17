@@ -1,5 +1,5 @@
 import re
-from typing import Any
+from typing import Any, NamedTuple
 
 from src.models.enums import (
     FinishCondition,
@@ -10,6 +10,21 @@ from src.models.enums import (
     SewerageType,
 )
 from src.models.listing import ListingSchema
+
+
+class Stage2AnalysisResult(NamedTuple):
+    passed: bool
+    rejection_reasons: list[str]
+    pros: list[str]
+    cons: list[str]
+    detected_subtype: SegmentSubtype
+    is_corner: bool
+    has_parking_or_garage: bool
+    detected_finish: FinishCondition
+    has_visualisations: bool
+    detected_sewerage: SewerageType
+    detected_heating: HeatingType
+    has_fiber: bool
 
 
 class Stage2SemanticFilter:
@@ -226,26 +241,11 @@ class Stage2SemanticFilter:
                 pass
         return None
 
-    def analyze(
-        self, listing: ListingSchema, profile: Any | None = None
-    ) -> tuple[
-        bool,
-        list[str],
-        list[str],
-        list[str],
-        SegmentSubtype,
-        bool,
-        bool,
-        FinishCondition,
-        bool,
-        SewerageType,
-        HeatingType,
-        bool,
-    ]:
+    def analyze(self, listing: ListingSchema, profile: Any | None = None) -> Stage2AnalysisResult:
         """
         Runs Stage II semantic evaluation according to property category.
         Returns:
-            (passed, rejection_reasons, pros, cons, detected_subtype, is_corner, has_parking, detected_finish, has_visualisations, detected_sewerage, detected_heating, has_fiber)
+            Stage2AnalysisResult(passed, rejection_reasons, pros, cons, detected_subtype, is_corner, has_parking, detected_finish, has_visualisations, detected_sewerage, detected_heating, has_fiber)
         """
         rejection_reasons: list[str] = []
         pros: list[str] = []
@@ -504,17 +504,17 @@ class Stage2SemanticFilter:
             pass
 
         passed = len(rejection_reasons) == 0
-        return (
-            passed,
-            rejection_reasons,
-            pros,
-            cons,
-            detected_subtype,
-            is_corner,
-            has_parking_or_garage,
-            detected_finish,
-            has_visualisations,
-            detected_sewerage,
-            detected_heating,
-            has_fiber,
+        return Stage2AnalysisResult(
+            passed=passed,
+            rejection_reasons=rejection_reasons,
+            pros=pros,
+            cons=cons,
+            detected_subtype=detected_subtype,
+            is_corner=is_corner,
+            has_parking_or_garage=has_parking_or_garage,
+            detected_finish=detected_finish,
+            has_visualisations=has_visualisations,
+            detected_sewerage=detected_sewerage,
+            detected_heating=detected_heating,
+            has_fiber=has_fiber,
         )

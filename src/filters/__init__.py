@@ -1,6 +1,9 @@
 import re
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.storage.models import ListingModel
 
 from loguru import logger
 
@@ -22,7 +25,7 @@ from .fingerprint import (
     generate_physical_fingerprint,
     generate_property_fingerprint,
 )
-from .llm_analyzer import PROMPT_VERSION, LLMAnalyzer, estimate_tokens, load_prompt_template
+from .llm_analyzer import PROMPT_VERSION, SUGGESTED_OLLAMA_MODELS, LLMAnalyzer, estimate_tokens, load_prompt_template
 from .stage1_hard_rules import Stage1Filter
 from .stage2_semantic import Stage2SemanticFilter
 
@@ -63,6 +66,68 @@ class QualificationEngine:
 
         return estimate_llm_tokens(text)
 
+    @staticmethod
+    def _build_filter_result(
+        listing: ListingSchema,
+        *,
+        is_qualified: bool,
+        status: QualificationStatus,
+        score: float,
+        passed_stage1: bool,
+        stage1_reasons: list[str],
+        passed_stage2: bool,
+        stage2_reasons: list[str],
+        pros: list[str],
+        cons: list[str],
+        is_corner: bool = False,
+        has_parking_or_garage: bool = False,
+        matched_whitelist_area: str | None = None,
+        ai_summary: str | None = None,
+        ai_verdict: str | None = None,
+        worth_interest: bool | None = None,
+        ai_questions: list[str] | None = None,
+        contact_phone: str | None = None,
+        contact_person: str | None = None,
+        stakeholder_questions: dict[str, list[str]] | None = None,
+        documents_to_obtain: list[str] | None = None,
+        structured_risks: list[dict[str, str]] | None = None,
+    ) -> FilterResult:
+        """Central factory for FilterResult copying spatial/environmental fields directly from listing."""
+        from src.models.listing import copy_spatial_fields
+
+        res = FilterResult(
+            is_qualified=is_qualified,
+            status=status,
+            score=score,
+            passed_stage1=passed_stage1,
+            stage1_reasons=stage1_reasons,
+            passed_stage2=passed_stage2,
+            stage2_reasons=stage2_reasons,
+            pros=pros,
+            cons=cons,
+            is_corner=is_corner,
+            has_parking_or_garage=has_parking_or_garage,
+            matched_whitelist_area=matched_whitelist_area,
+            finish_condition=listing.finish_condition,
+            has_visualisations=listing.has_visualisations,
+            sewerage=listing.sewerage,
+            heating=listing.heating,
+            has_fiber=listing.has_fiber,
+            ai_summary=ai_summary,
+            ai_verdict=ai_verdict,
+            worth_interest=worth_interest,
+            ai_questions=ai_questions or [],
+            contact_phone=contact_phone,
+            contact_person=contact_person,
+            mpzp_zone=listing.mpzp_zone,
+            flood_risk_zone=listing.flood_risk_zone,
+            stakeholder_questions=stakeholder_questions or getattr(listing, "stakeholder_questions", {}),
+            documents_to_obtain=documents_to_obtain or getattr(listing, "documents_to_obtain", []),
+            structured_risks=structured_risks or getattr(listing, "structured_risks", []),
+        )
+        copy_spatial_fields(res, listing)
+        return res
+
     def precheck_stage1(self, listing: ListingSchema, profile: Any | None = None) -> tuple[bool, list[str], str | None]:
         """Fast Stage 1 pre-check to decide whether expensive geocoding/spatial lookups should proceed."""
         p = profile
@@ -74,7 +139,7 @@ class QualificationEngine:
 
     def apply_spatial_findings(
         self,
-        listing: ListingSchema,
+        listing: "ListingSchema | ListingModel",
         score: float,
         pros: list[str],
         cons: list[str],
@@ -347,16 +412,9 @@ class QualificationEngine:
                 return FilterResult(
                     is_qualified=False,
                     status=QualificationStatus.REJECTED_STAGE1,
-                    score=0.0,
                     passed_stage1=False,
                     stage1_reasons=stage1_reasons,
                     passed_stage2=False,
-                    stage2_reasons=[],
-                    pros=[],
-                    cons=[],
-                    is_corner=False,
-                    has_parking_or_garage=False,
-                    matched_whitelist_area=None,
                     finish_condition=listing.finish_condition,
                     has_visualisations=listing.has_visualisations,
                     sewerage=listing.sewerage,
@@ -366,39 +424,33 @@ class QualificationEngine:
 
         # Step 2: Stage II (Semantic analysis) — runs before the LLM so that listings
         # rejected by cheap regex rules never consume LLM calls.
-        (
-            passed_stage2,
-            stage2_reasons,
-            pros,
-            cons,
-            detected_subtype,
-            is_corner,
-            has_parking,
-            detected_finish,
-            has_visualisations,
-            detected_sewerage,
-            detected_heating,
-            has_fiber,
-        ) = self.stage2.analyze(listing, profile=p)
+        res2 = self.stage2.analyze(listing, profile=p)
+        passed_stage2 = res2.passed
+        stage2_reasons = list(res2.rejection_reasons)
+        pros = list(res2.pros)
+        cons = list(res2.cons)
+        is_corner = res2.is_corner
+        has_parking = res2.has_parking_or_garage
+        has_visualisations = res2.has_visualisations
 
         # Update listing subtype, finish condition, visualisations, and utilities
-        if detected_subtype != SegmentSubtype.NIEOKRESLONY:
-            listing.segment_subtype = detected_subtype
-        if detected_finish != FinishCondition.NIEOKRESLONY:
-            listing.finish_condition = detected_finish
+        if res2.detected_subtype != SegmentSubtype.NIEOKRESLONY:
+            listing.segment_subtype = res2.detected_subtype
+        if res2.detected_finish != FinishCondition.NIEOKRESLONY:
+            listing.finish_condition = res2.detected_finish
         listing.has_visualisations = has_visualisations
-        if detected_sewerage != SewerageType.NIEZNANA:
-            listing.sewerage = detected_sewerage
-        if detected_heating != HeatingType.NIEZNANE:
-            listing.heating = detected_heating
-        listing.has_fiber = has_fiber
+        if res2.detected_sewerage != SewerageType.NIEZNANA:
+            listing.sewerage = res2.detected_sewerage
+        if res2.detected_heating != HeatingType.NIEZNANE:
+            listing.heating = res2.detected_heating
+        listing.has_fiber = res2.has_fiber
 
         # Borderline handling: an offer is borderline when it fails Stage I only by
         # small margins, or when its only Stage II failure is a "do remontu" finish.
         finish_only_borderline = False
         if not passed_stage2:
             finish_only_borderline = (
-                detected_finish == FinishCondition.DO_REMONTU
+                res2.detected_finish == FinishCondition.DO_REMONTU
                 and bool(stage2_reasons)
                 and all(r.startswith("Stan wykończenia") for r in stage2_reasons)
             )
@@ -603,7 +655,8 @@ class QualificationEngine:
 
         # Borderline offers land in a dedicated review category (no notifications).
         if is_borderline:
-            return FilterResult(
+            return self._build_filter_result(
+                listing,
                 is_qualified=False,
                 status=QualificationStatus.NEEDS_REVIEW_BORDERLINE,
                 score=10.0,
@@ -616,60 +669,20 @@ class QualificationEngine:
                 is_corner=is_corner,
                 has_parking_or_garage=has_parking,
                 matched_whitelist_area=matched_wl,
-                finish_condition=listing.finish_condition,
-                has_visualisations=listing.has_visualisations,
-                sewerage=listing.sewerage,
-                heating=listing.heating,
-                has_fiber=listing.has_fiber,
                 ai_summary=ai_summary,
                 ai_verdict=ai_verdict,
                 worth_interest=worth_interest,
                 ai_questions=ai_questions,
                 contact_phone=contact_phone,
                 contact_person=contact_person,
-                mpzp_zone=listing.mpzp_zone,
-                flood_risk_zone=listing.flood_risk_zone,
-                landslide_risk=listing.landslide_risk,
-                egib_building_status=listing.egib_building_status,
-                egib_soil_class=listing.egib_soil_class,
-                noise_level_db=listing.noise_level_db,
-                noise_zone=listing.noise_zone,
-                nature_protected_zone=listing.nature_protected_zone,
-                monument_zone=listing.monument_zone,
-                cemetery_buffer_zone=listing.cemetery_buffer_zone,
-                broadband_status=listing.broadband_status,
-                broadband_details=listing.broadband_details,
-                parcel_front_width_m=listing.parcel_front_width_m,
-                parcel_length_m=listing.parcel_length_m,
-                parcel_aspect_ratio=listing.parcel_aspect_ratio,
-                parcel_shape_type=listing.parcel_shape_type,
-                terrain_slope_pct=listing.terrain_slope_pct,
-                terrain_aspect=listing.terrain_aspect,
-                walkability_pka_dist_m=listing.walkability_pka_dist_m,
-                walkability_pka_name=listing.walkability_pka_name,
-                power_lines_risk=listing.power_lines_risk,
-                air_aqi=listing.air_aqi,
-                air_aqi_label=listing.air_aqi_label,
-                air_pm25_heating_avg=listing.air_pm25_heating_avg,
-                air_pm25_summer_avg=listing.air_pm25_summer_avg,
-                air_smog_days=listing.air_smog_days,
-                air_gios_station=listing.air_gios_station,
-                air_gios_dist_km=listing.air_gios_dist_km,
-                air_gios_index=listing.air_gios_index,
-                air_smog_risk=listing.air_smog_risk,
                 stakeholder_questions=stakeholder_questions,
                 documents_to_obtain=documents_to_obtain,
                 structured_risks=structured_risks,
-                solar_hours_per_year=listing.solar_hours_per_year,
-                solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
-                poi_counts=listing.poi_counts,
-                nearest_poi=listing.nearest_poi,
-                geology_formation=listing.geology_formation,
-                geology_risk_note=listing.geology_risk_note,
             )
 
         if not passed_stage2:
-            return FilterResult(
+            return self._build_filter_result(
+                listing,
                 is_qualified=False,
                 status=QualificationStatus.REJECTED_STAGE2,
                 score=10.0,
@@ -682,56 +695,15 @@ class QualificationEngine:
                 is_corner=is_corner,
                 has_parking_or_garage=has_parking,
                 matched_whitelist_area=matched_wl,
-                finish_condition=listing.finish_condition,
-                has_visualisations=listing.has_visualisations,
-                sewerage=listing.sewerage,
-                heating=listing.heating,
-                has_fiber=listing.has_fiber,
                 ai_summary=ai_summary,
                 ai_verdict=ai_verdict,
                 worth_interest=worth_interest,
                 ai_questions=ai_questions,
                 contact_phone=contact_phone,
                 contact_person=contact_person,
-                mpzp_zone=listing.mpzp_zone,
-                flood_risk_zone=listing.flood_risk_zone,
-                landslide_risk=listing.landslide_risk,
-                egib_building_status=listing.egib_building_status,
-                egib_soil_class=listing.egib_soil_class,
-                noise_level_db=listing.noise_level_db,
-                noise_zone=listing.noise_zone,
-                nature_protected_zone=listing.nature_protected_zone,
-                monument_zone=listing.monument_zone,
-                cemetery_buffer_zone=listing.cemetery_buffer_zone,
-                broadband_status=listing.broadband_status,
-                broadband_details=listing.broadband_details,
-                parcel_front_width_m=listing.parcel_front_width_m,
-                parcel_length_m=listing.parcel_length_m,
-                parcel_aspect_ratio=listing.parcel_aspect_ratio,
-                parcel_shape_type=listing.parcel_shape_type,
-                terrain_slope_pct=listing.terrain_slope_pct,
-                terrain_aspect=listing.terrain_aspect,
-                walkability_pka_dist_m=listing.walkability_pka_dist_m,
-                walkability_pka_name=listing.walkability_pka_name,
-                power_lines_risk=listing.power_lines_risk,
-                air_aqi=listing.air_aqi,
-                air_aqi_label=listing.air_aqi_label,
-                air_pm25_heating_avg=listing.air_pm25_heating_avg,
-                air_pm25_summer_avg=listing.air_pm25_summer_avg,
-                air_smog_days=listing.air_smog_days,
-                air_gios_station=listing.air_gios_station,
-                air_gios_dist_km=listing.air_gios_dist_km,
-                air_gios_index=listing.air_gios_index,
-                air_smog_risk=listing.air_smog_risk,
                 stakeholder_questions=stakeholder_questions,
                 documents_to_obtain=documents_to_obtain,
                 structured_risks=structured_risks,
-                solar_hours_per_year=listing.solar_hours_per_year,
-                solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
-                poi_counts=listing.poi_counts,
-                nearest_poi=listing.nearest_poi,
-                geology_formation=listing.geology_formation,
-                geology_risk_note=listing.geology_risk_note,
             )
 
         # Step 4: Scoring & Status resolution
@@ -745,7 +717,7 @@ class QualificationEngine:
             score += 15.0
         elif listing.category == PropertyCategory.DOM:
             score -= 10.0
-        if detected_subtype == SegmentSubtype.SRODKOWY:
+        if listing.segment_subtype == SegmentSubtype.SRODKOWY:
             score -= 5.0
         if listing.area_plot and listing.area_plot >= 350.0:
             score += 10.0
@@ -839,7 +811,8 @@ class QualificationEngine:
         else:
             status = QualificationStatus.QUALIFIED
 
-        return FilterResult(
+        return self._build_filter_result(
+            listing,
             is_qualified=True,
             status=status,
             score=score,
@@ -852,56 +825,15 @@ class QualificationEngine:
             is_corner=is_corner,
             has_parking_or_garage=has_parking,
             matched_whitelist_area=matched_wl,
-            finish_condition=listing.finish_condition,
-            has_visualisations=listing.has_visualisations,
-            sewerage=listing.sewerage,
-            heating=listing.heating,
-            has_fiber=listing.has_fiber,
             ai_summary=ai_summary,
             ai_verdict=ai_verdict,
             worth_interest=worth_interest,
             ai_questions=ai_questions,
             contact_phone=contact_phone,
             contact_person=contact_person,
-            mpzp_zone=listing.mpzp_zone,
-            flood_risk_zone=listing.flood_risk_zone,
-            landslide_risk=listing.landslide_risk,
-            egib_building_status=listing.egib_building_status,
-            egib_soil_class=listing.egib_soil_class,
-            noise_level_db=listing.noise_level_db,
-            noise_zone=listing.noise_zone,
-            nature_protected_zone=listing.nature_protected_zone,
-            monument_zone=listing.monument_zone,
-            cemetery_buffer_zone=listing.cemetery_buffer_zone,
-            broadband_status=listing.broadband_status,
-            broadband_details=listing.broadband_details,
-            parcel_front_width_m=listing.parcel_front_width_m,
-            parcel_length_m=listing.parcel_length_m,
-            parcel_aspect_ratio=listing.parcel_aspect_ratio,
-            parcel_shape_type=listing.parcel_shape_type,
-            terrain_slope_pct=listing.terrain_slope_pct,
-            terrain_aspect=listing.terrain_aspect,
-            walkability_pka_dist_m=listing.walkability_pka_dist_m,
-            walkability_pka_name=listing.walkability_pka_name,
-            power_lines_risk=listing.power_lines_risk,
-            air_aqi=listing.air_aqi,
-            air_aqi_label=listing.air_aqi_label,
-            air_pm25_heating_avg=listing.air_pm25_heating_avg,
-            air_pm25_summer_avg=listing.air_pm25_summer_avg,
-            air_smog_days=listing.air_smog_days,
-            air_gios_station=listing.air_gios_station,
-            air_gios_dist_km=listing.air_gios_dist_km,
-            air_gios_index=listing.air_gios_index,
-            air_smog_risk=listing.air_smog_risk,
             stakeholder_questions=stakeholder_questions,
             documents_to_obtain=documents_to_obtain,
             structured_risks=structured_risks,
-            solar_hours_per_year=listing.solar_hours_per_year,
-            solar_energy_kwh_m2=listing.solar_energy_kwh_m2,
-            poi_counts=listing.poi_counts,
-            nearest_poi=listing.nearest_poi,
-            geology_formation=listing.geology_formation,
-            geology_risk_note=listing.geology_risk_note,
         )
 
 
@@ -916,6 +848,7 @@ __all__ = [
     "compute_desc_hash",
     "estimate_llm_tokens",
     "PROMPT_VERSION",
+    "SUGGESTED_OLLAMA_MODELS",
     "estimate_tokens",
     "load_prompt_template",
 ]
