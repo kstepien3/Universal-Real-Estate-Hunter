@@ -26,7 +26,6 @@ class ListingModel(Base):
     portal: Mapped[str] = mapped_column(String(50), nullable=False)
     portal_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     url: Mapped[str] = mapped_column(String(1000), nullable=False, unique=True, index=True)
-    property_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     physical_fingerprint: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     listing_status: Mapped[str] = mapped_column(String(30), default="ACTIVE", index=True)
     first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

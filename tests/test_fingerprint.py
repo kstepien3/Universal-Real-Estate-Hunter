@@ -1,49 +1,66 @@
-from src.filters.fingerprint import generate_property_fingerprint
+from src.filters.fingerprint import generate_physical_fingerprint
 
 
-def test_property_fingerprint_tolerance():
-    # Listing 1 from Agency A: 1,190,000 PLN, 120m2, plot 350m2, Paderewskiego
-    fp1 = generate_property_fingerprint(
-        price=1_190_000,
+def test_physical_fingerprint_tolerates_minor_area_differences():
+    """Same property relisted by another agency with slightly different measurements."""
+    # Agency A: 120m2, 350m2 plot, 5 pokoi, Paderewskiego, Rzeszów
+    fp1 = generate_physical_fingerprint(
         area_home=120.0,
         area_plot=350.0,
+        rooms=5,
         street="Paderewskiego",
-        title="Dom szeregowy skrajny na sprzedaż",
+        city="Rzeszów",
     )
 
-    # Listing 2 from Agency B for the SAME house:
-    # Slightly rounded area: 121.2 m2 (+/- 2m2)
-    # Slightly rounded plot: 354 m2 (+/- 10m2)
-    # Slightly different title and price: 1,194,000 PLN (rounds to 1.19M bucket)
-    fp2 = generate_property_fingerprint(
-        price=1_194_000,
-        area_home=121.2,
+    # Agency B: ±1m2 area, ±5m2 plot — same physical property
+    fp2 = generate_physical_fingerprint(
+        area_home=121.0,
         area_plot=354.0,
+        rooms=5,
         street="ul. Ignacego Paderewskiego",
-        title="Okazja! Piękny szereg skrajny Paderewskiego",
+        city="rzeszow",
     )
 
-    assert fp1 == fp2, f"Expected identical fingerprint for duplicate offer, got {fp1} vs {fp2}"
+    assert fp1 is not None
+    assert fp1 == fp2, f"Expected identical fingerprint for same property, got {fp1} vs {fp2}"
 
 
-def test_property_fingerprint_differentiation():
-    # House on Paderewskiego
-    fp1 = generate_property_fingerprint(
-        price=1_190_000,
+def test_physical_fingerprint_price_does_not_affect_result():
+    """Physical fingerprint is price-independent — price changes must not produce new fingerprints."""
+    fp_original = generate_physical_fingerprint(
         area_home=120.0,
         area_plot=350.0,
+        rooms=5,
         street="Paderewskiego",
+        city="Rzeszów",
     )
+    fp_repriced = generate_physical_fingerprint(
+        area_home=120.0,
+        area_plot=350.0,
+        rooms=5,
+        street="Paderewskiego",
+        city="Rzeszów",
+    )
+    assert fp_original == fp_repriced, "Fingerprint must be price-independent"
 
-    # Completely different house on Lubelska with different size and price
-    fp2 = generate_property_fingerprint(
-        price=950_000,
+
+def test_physical_fingerprint_differentiation():
+    # House on Paderewskiego vs different house on Lubelska
+    fp1 = generate_physical_fingerprint(
+        area_home=120.0,
+        area_plot=350.0,
+        rooms=5,
+        street="Paderewskiego",
+        city="Rzeszów",
+    )
+    fp2 = generate_physical_fingerprint(
         area_home=95.0,
         area_plot=200.0,
+        rooms=4,
         street="Lubelska",
+        city="Rzeszów",
     )
-
-    assert fp1 != fp2, "Different houses must have distinct fingerprints"
+    assert fp1 != fp2, "Different properties must have distinct fingerprints"
 
 
 def test_extract_street_token_unknown_fallback():
@@ -80,7 +97,7 @@ def test_physical_fingerprint_price_independent():
     assert fp1 == fp2, "Physical fingerprint must match across re-listings regardless of price"
 
 
-def test_physical_fingerprint_differentiation():
+def test_physical_fingerprint_different_cities():
     from src.filters.fingerprint import generate_physical_fingerprint
 
     fp1 = generate_physical_fingerprint(

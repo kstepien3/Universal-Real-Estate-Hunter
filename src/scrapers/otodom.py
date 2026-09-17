@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from loguru import logger
 
 from config import settings
-from src.filters.fingerprint import generate_property_fingerprint
+from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.enums import (
     BuildingType,
     FinishCondition,
@@ -461,12 +461,13 @@ class OtodomScraper(BaseScraper):
             except Exception:
                 category_enum = PropertyCategory.DOM
 
-            fingerprint = generate_property_fingerprint(
-                price=price,
+            physical_fp = generate_physical_fingerprint(
                 area_home=area_home,
                 area_plot=area_plot,
+                rooms=rooms,
                 street=street_name,
                 district=district_name,
+                city=city_name,
                 location_raw=location_raw,
                 title=title,
                 category=cat_str,
@@ -506,7 +507,7 @@ class OtodomScraper(BaseScraper):
                 raw_description=raw_description,
                 main_image_url=main_image_url,
                 gallery_images=gallery_images,
-                property_fingerprint=fingerprint,
+                physical_fingerprint=physical_fp,
                 created_at=created_at,
                 scraped_at=datetime.now(UTC),
                 skip_detail=detail_skipped,

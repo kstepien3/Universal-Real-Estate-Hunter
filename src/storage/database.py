@@ -1,5 +1,6 @@
 import asyncio
 import os
+import socket
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -57,7 +58,11 @@ def is_sqlite_lock_error(exc: BaseException) -> bool:
 
 async def safe_commit(session: AsyncSession, max_retries: int = 7, initial_backoff: float = 0.25) -> None:
     """Commit with retry and write-lock protection for SQLite against locks & readonly contention."""
-    is_sqlite = "sqlite" in settings.DATABASE_URL
+    is_sqlite = (
+        session.bind.dialect.name == "sqlite"
+        if session.bind
+        else ("sqlite" in getattr(settings, "DATABASE_URL", "sqlite"))
+    )
     if not is_sqlite:
         await session.commit()
         return
@@ -158,10 +163,57 @@ def verify_and_repair_sqlite_permissions(db_path_str: str) -> None:
             )
 
 
+def is_postgres_available(host: str = "127.0.0.1", port: int = 5432, timeout_s: float = 0.5) -> bool:
+    """Fast check if a PostgreSQL server port is actively listening and reachable."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout_s):
+            return True
+    except (OSError, TimeoutError):
+        return False
+
+
+def resolve_database_url() -> str:
+    """Resolves active database URL.
+
+    If DATABASE_URL is explicitly set to non-default or non-sqlite, returns it as-is.
+    If default sqlite is configured, checks whether a PostgreSQL service is running
+    locally (e.g. from docker compose up -d db) and automatically upgrades to it,
+    enabling zero-config auto-migration from SQLite to Postgres.
+    """
+    configured_url = getattr(settings, "DATABASE_URL", "")
+    # Only auto-upgrade if DATABASE_URL is the application's out-of-the-box default
+    # ('sqlite+aiosqlite:///data/listings.db') and not running inside automated test isolation.
+    default_urls = (
+        "sqlite+aiosqlite:///data/listings.db",
+        "sqlite+aiosqlite:///./data/listings.db",
+        "sqlite+aiosqlite:////app/data/listings.db",
+    )
+    if configured_url not in default_urls:
+        return configured_url
+
+    if "PYTEST_CURRENT_TEST" in os.environ:
+        return configured_url
+
+    # Check if DATABASE_URL was explicitly provided in os.environ (user explicitly wants sqlite)
+    if os.environ.get("DATABASE_URL") and "sqlite" in os.environ["DATABASE_URL"]:
+        return configured_url
+
+    # Check local PostgreSQL connection endpoint (default port 5432)
+    pg_url = "postgresql+asyncpg://estate:estate_hunter_secret_pass@127.0.0.1:5432/estate_hunter"
+    if is_postgres_available("127.0.0.1", 5432):
+        logger.info(
+            f"[Database] Wykryto aktywny serwer PostgreSQL na 127.0.0.1:5432. Przełączanie z SQLite na {pg_url}."
+        )
+        settings.DATABASE_URL = pg_url
+        return pg_url
+
+    return configured_url
+
+
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
-        db_url = settings.DATABASE_URL
+        db_url = resolve_database_url()
         is_sqlite = "sqlite" in db_url
         engine_kwargs: dict = {
             "echo": False,
@@ -499,6 +551,14 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
 
         sync_conn.close()
         logger.info("[Database] ✅ Automatyczna migracja ze SQLite do PostgreSQL zakończona pomyślnie!")
+        # Safely rename source SQLite DB as backup to prevent repeated checks
+        try:
+            backup_path = sqlite_path.with_suffix(".db.migrated_backup")
+            if not backup_path.exists():
+                sqlite_path.rename(backup_path)
+                logger.info(f"[Database] Zarchiwizowano stary plik SQLite do: {backup_path}")
+        except Exception as e:
+            logger.debug(f"[Database] Nie udało się zmienić nazwy pliku SQLite: {e}")
     except Exception as err:
         logger.warning(f"[Database] Błąd podczas automatycznej migracji SQLite -> PostgreSQL: {err}")
 
@@ -507,7 +567,7 @@ async def init_db() -> None:
     """Initialize database tables and run lightweight migrations with contention retry."""
     engine = get_engine()
     logger.info("Initializing database tables...")
-    is_sqlite = "sqlite" in settings.DATABASE_URL
+    is_sqlite = engine.dialect.name == "sqlite"
     max_retries = 5
     for attempt in range(max_retries):
         try:

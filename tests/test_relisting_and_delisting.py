@@ -4,7 +4,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.filters.fingerprint import generate_physical_fingerprint, generate_property_fingerprint
+from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.enums import BuildingType, QualificationStatus, SegmentSubtype
 from src.models.listing import FilterResult, ListingSchema
 from src.services.market_analyzer import analyze_negotiation
@@ -38,13 +38,6 @@ async def test_find_relist_by_physical_fingerprint(async_session: AsyncSession):
     )
     assert phys_fp is not None
 
-    prop_fp1 = generate_property_fingerprint(
-        price=950_000,
-        area_home=130.0,
-        area_plot=450.0,
-        street="Sikorskiego",
-    )
-
     listing_old = ListingSchema(
         id="old123",
         portal="Otodom",
@@ -60,7 +53,6 @@ async def test_find_relist_by_physical_fingerprint(async_session: AsyncSession):
         street="Sikorskiego",
         city="Rzeszów",
         rooms=5,
-        property_fingerprint=prop_fp1,
         physical_fingerprint=phys_fp,
         initial_price=950_000,
     )
@@ -98,7 +90,6 @@ async def test_mark_passive_delisted(async_session: AsyncSession):
         portal="Otodom",
         portal_id="act1",
         url="https://otodom.pl/act1",
-        property_fingerprint="fp1",
         title="Dom aktywny",
         price=700_000,
         price_per_m2=7000,
@@ -110,7 +101,6 @@ async def test_mark_passive_delisted(async_session: AsyncSession):
         portal="Otodom",
         portal_id="stale1",
         url="https://otodom.pl/stale1",
-        property_fingerprint="fp2",
         title="Dom wycofany",
         price=800_000,
         price_per_m2=8000,

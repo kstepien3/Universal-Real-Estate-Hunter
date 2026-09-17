@@ -350,7 +350,6 @@ async def test_pipeline_backfill_existing_spatial_data(async_session, monkeypatc
         portal="otodom",
         portal_id="backfill_test_123",
         url="https://www.otodom.pl/pl/oferta/backfill-123",
-        property_fingerprint="fp_backfill_123",
         title="Dom pod miastem",
         price=600000.0,
         price_per_m2=4285.7,

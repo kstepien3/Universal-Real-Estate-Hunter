@@ -25,8 +25,8 @@ from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
 
 
-def _should_notify(*, is_qualified: bool, is_new: bool, is_duplicate: bool, price_changed: bool) -> bool:
-    return is_qualified and ((is_new and not is_duplicate) or price_changed)
+def _should_notify(*, is_qualified: bool, is_new: bool, price_changed: bool) -> bool:
+    return is_qualified and (is_new or price_changed)
 
 
 async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
@@ -126,7 +126,7 @@ class ScraperPipeline:
     End-to-end analytical pipeline:
     1. Scrapes targets (Otodom, OLX, Nieruchomosci-online).
     2. Broadcasts live progress to terminal and web dashboard.
-    3. Performs cross-portal / multi-agency deduplication via property_fingerprint.
+    3. Detects re-listings and multi-agency duplicates via physical_fingerprint.
     4. Executes Two-Stage filtration and semantic qualification.
     5. Persists data, price history, and qualification status via SQLAlchemy 2.0.
     6. Dispatches notifications for new matching offers and price drops.
@@ -162,7 +162,6 @@ class ScraperPipeline:
     ) -> dict[str, Any]:
         result: dict[str, Any] = {
             "is_new": False,
-            "is_duplicate_fingerprint": False,
             "price_changed": False,
             "qualified": False,
             "notified": False,
@@ -192,20 +191,6 @@ class ScraperPipeline:
                 title=listing.title,
                 category=listing.category,
             )
-
-        if listing.property_fingerprint:
-            duplicate_model = await repo.find_duplicate_by_fingerprint(listing.property_fingerprint)
-            if duplicate_model and duplicate_model.url != listing.url:
-                logger.info(
-                    f"[Pipeline] Found multi-agency/cross-portal duplicate for '{listing.title[:40]}' "
-                    f"(matches existing ID {duplicate_model.id} from {duplicate_model.portal})."
-                )
-                global_tracker.add_log(
-                    f"📋 [Duplikat] {listing.title[:30]}: ta sama nieruchomość co #{duplicate_model.id} ({duplicate_model.portal})",
-                    level="info",
-                    category="info",
-                )
-                result["is_duplicate_fingerprint"] = True
 
         if listing.physical_fingerprint and not existing_model:
             relist_model = await repo.find_relist_by_physical_fingerprint(
@@ -364,6 +349,7 @@ class ScraperPipeline:
                 filter_result.worth_interest = existing_model.worth_interest
 
         # Apply spatial findings if not already reflected on qualified result
+        # (e.g. when engine is mocked in tests or evaluate_listing was bypassed)
         if filter_result.is_qualified and not filter_result.mpzp_zone and (geo_audit or listing.mpzp_zone):
             new_score, new_pros, new_cons = self.engine.apply_spatial_findings(
                 listing=listing,
@@ -435,7 +421,6 @@ class ScraperPipeline:
         should_notify = _should_notify(
             is_qualified=filter_result.is_qualified,
             is_new=is_new,
-            is_duplicate=result["is_duplicate_fingerprint"],
             price_changed=price_changed,
         )
 
@@ -494,7 +479,6 @@ class ScraperPipeline:
                 should_notify = _should_notify(
                     is_qualified=filt.is_qualified,
                     is_new=is_new,
-                    is_duplicate=res["is_duplicate_fingerprint"],
                     price_changed=price_changed,
                 )
                 if should_notify and db_model.notified_at is None:
@@ -735,7 +719,6 @@ class ScraperPipeline:
 
             empty_cancel_res = {
                 "is_new": False,
-                "is_duplicate_fingerprint": False,
                 "price_changed": False,
                 "qualified": False,
                 "notified": False,
@@ -775,8 +758,6 @@ class ScraperPipeline:
             for _item, res in results:
                 if res["is_new"]:
                     total_new += 1
-                if res["is_duplicate_fingerprint"]:
-                    total_duplicates += 1
                 if res["price_changed"]:
                     total_price_changes += 1
                 if res["qualified"]:
@@ -791,7 +772,7 @@ class ScraperPipeline:
                 global_tracker.record_items(
                     count=1,
                     qualified=1 if res["qualified"] and res["is_new"] else 0,
-                    duplicates=1 if res["is_duplicate_fingerprint"] else 0,
+                    duplicates=0,
                 )
 
             global_tracker.set_processing_fraction(step_idx, total_steps, 1, 1)

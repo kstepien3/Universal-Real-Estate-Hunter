@@ -255,7 +255,6 @@ class ListingSchema(BaseModel):
     raw_description: str = ""
     main_image_url: str | None = None
     gallery_images: list[str] = Field(default_factory=list)
-    property_fingerprint: str | None = None
     physical_fingerprint: str | None = None
     listing_status: str = "ACTIVE"
     first_seen_at: datetime | None = None

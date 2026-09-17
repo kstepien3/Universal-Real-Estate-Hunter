@@ -275,7 +275,7 @@ class DiscordNotifier:
             "color": color,
             "fields": fields,
             "footer": {
-                "text": f"Portal: {listing.portal} • Fingerprint: {listing.property_fingerprint} • {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                "text": f"Portal: {listing.portal} • Fingerprint: {listing.physical_fingerprint} • {datetime.now().strftime('%Y-%m-%d %H:%M')}",
             },
         }
 
