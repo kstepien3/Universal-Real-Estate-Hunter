@@ -367,10 +367,9 @@ class LiveDashboardServer:
         from src.services.progress import global_tracker
 
         now_utc = datetime.now(UTC)
-        db_url = settings.DATABASE_URL or ""
-        is_postgres = db_url.startswith("postgres")
-
+        db_url = getattr(settings, "DATABASE_URL", "")
         async with get_session() as session:
+            is_postgres = session.bind.dialect.name == "postgresql" if session.bind else (db_url.startswith("postgres"))
             counts = (
                 await session.execute(
                     select(

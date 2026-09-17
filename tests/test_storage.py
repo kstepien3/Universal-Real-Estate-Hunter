@@ -5,7 +5,7 @@ import pytest_asyncio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from src.filters.fingerprint import generate_property_fingerprint
+from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.enums import BuildingType, QualificationStatus, SegmentSubtype
 from src.models.listing import FilterResult, ListingSchema
 from src.storage.models import Base, ListingModel
@@ -30,10 +30,10 @@ async def async_session():
 async def test_repository_save_and_price_history(async_session: AsyncSession):
     repo = ListingRepository(async_session)
 
-    fp = generate_property_fingerprint(
-        price=1_100_000,
+    fp = generate_physical_fingerprint(
         area_home=120.0,
         area_plot=300.0,
+        rooms=None,
         street="Witolda",
     )
 
@@ -50,7 +50,7 @@ async def test_repository_save_and_price_history(async_session: AsyncSession):
         segment_subtype=SegmentSubtype.SKRAJNY,
         location_raw="Rzeszów, Słocina",
         street="Witolda",
-        property_fingerprint=fp,
+        physical_fingerprint=fp,
     )
 
     filt_res = FilterResult(
@@ -71,10 +71,11 @@ async def test_repository_save_and_price_history(async_session: AsyncSession):
     assert model.title == "Dom na Witolda"
     assert model.is_qualified is True
 
-    # Check deduplication by fingerprint
-    duplicate = await repo.find_duplicate_by_fingerprint(fp)
-    assert duplicate is not None
-    assert duplicate.id == model.id
+    # Check re-listing detection by physical fingerprint
+    assert fp is not None
+    relist = await repo.find_relist_by_physical_fingerprint(fp, exclude_url="https://otodom.pl/oferta/different-url")
+    assert relist is not None
+    assert relist.id == model.id
 
     # 2. Update with price drop
     listing.price = 1_050_000
@@ -102,7 +103,6 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 portal="Otodom",
                 portal_id="a",
                 url="https://otodom.pl/x/fresh",
-                property_fingerprint="f1",
                 title="t",
                 price=1,
                 price_per_m2=1,
@@ -114,7 +114,6 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 portal="Otodom",
                 portal_id="b",
                 url="https://otodom.pl/x/stale",
-                property_fingerprint="f2",
                 title="t",
                 price=1,
                 price_per_m2=1,
@@ -126,7 +125,6 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 portal="OLX",
                 portal_id="c",
                 url="https://olx.pl/x/other-portal",
-                property_fingerprint="f3",
                 title="t",
                 price=1,
                 price_per_m2=1,
@@ -138,7 +136,6 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 portal="Otodom",
                 portal_id="d",
                 url="https://otodom.pl/x/empty-desc",
-                property_fingerprint="f4",
                 title="t",
                 price=1,
                 price_per_m2=1,
@@ -162,7 +159,7 @@ async def test_get_fresh_urls(async_session: AsyncSession):
 async def test_update_does_not_wipe_detected_flags(async_session: AsyncSession):
     repo = ListingRepository(async_session)
 
-    fp = generate_property_fingerprint(price=900_000, area_home=110.0, area_plot=300.0)
+    fp = generate_physical_fingerprint(area_home=110.0, area_plot=300.0)
     listing = ListingSchema(
         id="otodom-200",
         portal="Otodom",
@@ -173,7 +170,7 @@ async def test_update_does_not_wipe_detected_flags(async_session: AsyncSession):
         area_home=110.0,
         area_plot=300.0,
         location_raw="Rzeszów",
-        property_fingerprint=fp,
+        physical_fingerprint=fp,
         has_fiber=True,
         has_visualisations=True,
     )
@@ -200,8 +197,7 @@ async def test_update_does_not_wipe_detected_flags(async_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_repository_gallery_images(async_session: AsyncSession):
     repo = ListingRepository(async_session)
-    fp = generate_property_fingerprint(
-        price=850_000,
+    fp = generate_physical_fingerprint(
         area_home=120.0,
         area_plot=250.0,
         street="Krakowska",
@@ -221,7 +217,7 @@ async def test_repository_gallery_images(async_session: AsyncSession):
         area_home=120.0,
         area_plot=250.0,
         location_raw="Rzeszów",
-        property_fingerprint=fp,
+        physical_fingerprint=fp,
         gallery_images=test_gallery,
     )
     filt_res = FilterResult(
@@ -258,7 +254,6 @@ async def test_repository_delete_all_listings(async_session: AsyncSession):
             portal="Otodom",
             portal_id=f"reset-{i}",
             url=f"https://otodom.pl/x/reset-{i}",
-            property_fingerprint=f"fp-{i}",
             title=f"Dom {i}",
             price=1_000_000 - i,
             price_per_m2=8_000,
@@ -288,7 +283,7 @@ async def test_repository_delete_all_listings_empty(async_session: AsyncSession)
 @pytest.mark.asyncio
 async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
     repo = ListingRepository(async_session)
-    fp = generate_property_fingerprint(price=950_000, area_home=115.0, area_plot=300.0)
+    fp = generate_physical_fingerprint(area_home=115.0, area_plot=300.0)
     listing = ListingSchema(
         id="otodom-ai-1",
         portal="Otodom",
@@ -299,7 +294,7 @@ async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
         area_home=115.0,
         area_plot=300.0,
         location_raw="Rzeszów",
-        property_fingerprint=fp,
+        physical_fingerprint=fp,
     )
     filt_res = FilterResult(
         is_qualified=True,
@@ -365,7 +360,6 @@ async def test_repository_spatial_fields(async_session):
         area_home=0.0,
         area_plot=1000.0,
         location_raw="Rzeszów",
-        property_fingerprint="fp-spatial-1",
     )
     listing.parcel_id = "186301_1.0221.2296/2"
     listing.cadastral_area = 550.0
@@ -534,3 +528,22 @@ async def test_migrate_database_columns_postgres_simulation():
         s for s in executed_sqls if "ALTER TABLE listings ADD COLUMN IF NOT EXISTS air_aqi INTEGER" in s
     ]
     assert len(air_aqi_statements) == 1
+
+
+def test_resolve_database_url_auto_detect(monkeypatch):
+    """Test that resolve_database_url automatically selects PostgreSQL when available."""
+    from src.storage.database import resolve_database_url
+
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    # When postgres port is not available, keeps default sqlite
+    monkeypatch.setattr("src.storage.database.is_postgres_available", lambda host, port: False)
+    monkeypatch.setattr("config.settings.DATABASE_URL", "sqlite+aiosqlite:///data/listings.db")
+    assert "sqlite" in resolve_database_url()
+
+    # When postgres port is reachable, auto upgrades
+    monkeypatch.setattr("src.storage.database.is_postgres_available", lambda host, port: True)
+    upgraded = resolve_database_url()
+    assert "postgresql" in upgraded
+    assert "estate_hunter" in upgraded

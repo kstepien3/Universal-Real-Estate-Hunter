@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from loguru import logger
 
 from config import settings
-from src.filters.fingerprint import generate_property_fingerprint
+from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.enums import (
     BuildingType,
     FinishCondition,
@@ -379,8 +379,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
             except Exception:
                 category_enum = PropertyCategory.DOM
 
-            fp = generate_property_fingerprint(
-                price=price_val,
+            physical_fp = generate_physical_fingerprint(
                 area_home=area_home,
                 area_plot=area_plot,
                 street=street,
@@ -412,7 +411,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
                 raw_description=raw_description,
                 main_image_url=main_image_url,
                 gallery_images=[main_image_url] if main_image_url else [],
-                property_fingerprint=fp,
+                physical_fingerprint=physical_fp,
                 created_at=datetime.now(UTC),
                 scraped_at=datetime.now(UTC),
             )

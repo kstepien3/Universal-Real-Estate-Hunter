@@ -243,6 +243,10 @@ class NominatimGeocoder:
         if resolved_city_slug and resolved_city_slug in CITY_CENTROIDS:
             return CITY_CENTROIDS[resolved_city_slug]
 
+        # 4. Check known suburban municipalities / localities in primary metropolitan area (e.g. Krasne, Świlcza)
+        if resolved_city_slug and resolved_city_slug in DISTRICT_CENTROIDS_BY_CITY.get("rzeszow", {}):
+            return DISTRICT_CENTROIDS_BY_CITY["rzeszow"][resolved_city_slug]
+
         return None
 
     async def geocode(

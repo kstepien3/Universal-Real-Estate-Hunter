@@ -201,7 +201,6 @@ def test_stage1_apartment_rules():
         segment_subtype=SegmentSubtype.NIEOKRESLONY,
         location_raw="Rzeszów, Centrum",
         city="Rzeszów",
-        property_fingerprint="fp_apt_1",
     )
     passed, reasons, _ = rules.evaluate(valid_apt)
     assert passed is True, f"Expected pass, got reasons: {reasons}"
@@ -248,7 +247,6 @@ def test_stage2_apartment_and_plot_semantics():
         segment_subtype=SegmentSubtype.NIEOKRESLONY,
         location_raw="Rzeszów, Drabinianka",
         city="Rzeszów",
-        property_fingerprint="fp_apt_sem_1",
         raw_description=desc,
     )
 
@@ -359,7 +357,6 @@ def test_profile_with_null_and_none_fields(tmp_path):
         category=PropertyCategory.DZIALKA,
         location_raw="Rzeszów",
         city="Rzeszów",
-        property_fingerprint="fp_null_1",
         raw_description="Piękna działka pod budowę",
     )
     passed, reasons, wl = stage1.evaluate(sample_listing)

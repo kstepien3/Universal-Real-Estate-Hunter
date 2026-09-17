@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from loguru import logger
 
 from config import settings
-from src.filters.fingerprint import generate_property_fingerprint
+from src.filters.fingerprint import generate_physical_fingerprint
 from src.models.enums import (
     BuildingType,
     FinishCondition,
@@ -350,11 +350,12 @@ class OLXScraper(BaseScraper):
             except Exception:
                 category_enum = PropertyCategory.DOM
 
-            fingerprint = generate_property_fingerprint(
-                price=price,
+            physical_fp = generate_physical_fingerprint(
                 area_home=area_home,
                 area_plot=area_plot,
+                rooms=rooms,
                 district=district_name,
+                city=city_name,
                 location_raw=location_raw,
                 title=title,
                 category=cat_str,
@@ -391,7 +392,7 @@ class OLXScraper(BaseScraper):
                 raw_description=clean_desc,
                 main_image_url=main_image_url,
                 gallery_images=gallery_images,
-                property_fingerprint=fingerprint,
+                physical_fingerprint=physical_fp,
                 created_at=datetime.now(UTC),
                 scraped_at=datetime.now(UTC),
             )
@@ -475,10 +476,10 @@ class OLXScraper(BaseScraper):
                         fallback_city = getattr(self.profile, "city", None) or ""
                         loc_txt = desc_p.get_text(strip=True) if desc_p else fallback_city
 
-                        fp = generate_property_fingerprint(
-                            price=price_val,
+                        physical_fp = generate_physical_fingerprint(
                             area_home=0.0,  # unknown in HTML fallback
                             area_plot=None,
+                            city=getattr(self.profile, "city", None),
                             location_raw=loc_txt,
                             title=title_txt,
                         )
@@ -492,7 +493,7 @@ class OLXScraper(BaseScraper):
                             price_per_m2=0.0,
                             area_home=0.0,
                             location_raw=loc_txt,
-                            property_fingerprint=fp,
+                            physical_fingerprint=physical_fp,
                             created_at=datetime.now(UTC),
                             scraped_at=datetime.now(UTC),
                         )

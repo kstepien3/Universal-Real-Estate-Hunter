@@ -4,7 +4,6 @@ import random
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 
-import httpx
 from curl_cffi.requests import AsyncSession
 from loguru import logger
 
@@ -128,20 +127,8 @@ class BaseScraper(ABC):
                     logger.warning(f"[{self.name}] Status {resp.status_code} for {url}")
 
             except Exception as curl_err:
-                logger.debug(f"[{self.name}] curl_cffi error on {url}: {curl_err}. Trying httpx...")
+                logger.warning(f"[{self.name}] curl_cffi error ({attempt}/{self.max_retries}) on {url}: {curl_err}")
                 self._session = None  # Reset broken handle; recreate on next request
-                # Fallback: httpx
-                try:
-                    async with httpx.AsyncClient(
-                        follow_redirects=True,
-                        timeout=self.timeout,
-                        proxy=self.proxy,
-                    ) as client:
-                        resp = await client.get(url, headers=headers)
-                        if resp.status_code == 200:
-                            return resp.text
-                except Exception as httpx_err:
-                    logger.warning(f"[{self.name}] HTTP request failed ({attempt}/{self.max_retries}): {httpx_err}")
 
             delay = 1.5 * (2 ** (attempt - 1)) + random.uniform(0.5, 1.5)
             delay *= self._throttle_multiplier

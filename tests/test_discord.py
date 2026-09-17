@@ -23,7 +23,7 @@ def test_discord_embed_formatting():
         city="Rzeszów",
         access_road_type=RoadType.ASFALT,
         main_image_url="https://img.example.com/photo.jpg",
-        property_fingerprint="fp_test123",
+        physical_fingerprint="phys_test123",
     )
 
     filter_result = FilterResult(

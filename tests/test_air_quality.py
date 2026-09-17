@@ -67,7 +67,7 @@ def test_compute_seasonal_metrics():
         pm10.extend([val * 1.5, val * 1.5])
         aqi.extend([val * 1.2, val * 1.2])
 
-    hourly_data = {
+    hourly_data: dict[str, list[Any]] = {
         "time": times,
         "pm2_5": pm25,
         "pm10": pm10,
@@ -212,7 +212,6 @@ class AirQualityDashboardApiTest(AioHTTPTestCase):
                 title="Dom z audytem powietrza",
                 portal="Otodom",
                 portal_id=f"aqi-portal-{uid}",
-                property_fingerprint=f"fp-aqi-{uid}",
                 url=f"https://otodom.pl/aqi-portal-{uid}",
                 price=850_000,
                 price_per_m2=7083,
@@ -261,7 +260,6 @@ class AirQualityDashboardApiTest(AioHTTPTestCase):
                 title="Dom bez GPS",
                 portal="Otodom",
                 portal_id=f"aqi-portal-nogps-{uid}",
-                property_fingerprint=f"fp-aqi-nogps-{uid}",
                 url=f"https://otodom.pl/aqi-portal-nogps-{uid}",
                 price=850_000,
                 price_per_m2=7083,

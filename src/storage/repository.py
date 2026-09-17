@@ -212,24 +212,6 @@ class ListingRepository:
         res = await self.session.execute(stmt)
         return list(res.scalars().all())
 
-    async def find_duplicate_by_fingerprint(
-        self,
-        fingerprint: str,
-        within_days: int = 45,
-    ) -> ListingModel | None:
-        """Check if an identical house was already listed (cross-portal/multi-agency deduplication)."""
-        cutoff = datetime.now(UTC) - timedelta(days=within_days)
-        stmt = (
-            select(ListingModel)
-            .where(
-                ListingModel.property_fingerprint == fingerprint,
-                ListingModel.created_at >= cutoff,
-            )
-            .order_by(desc(ListingModel.created_at))
-        )
-        res = await self.session.execute(stmt)
-        return res.scalars().first()
-
     async def find_relist_by_physical_fingerprint(
         self,
         physical_fingerprint: str,
@@ -319,7 +301,6 @@ class ListingRepository:
             portal=listing.portal,
             portal_id=listing.id,
             url=listing.url,
-            property_fingerprint=listing.property_fingerprint or "unknown",
             created_at=listing.created_at,
             updated_at=listing.created_at,
         )
