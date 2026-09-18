@@ -6,6 +6,21 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.16.0 (2026-09-18)
+
+### Features
+
+- **intel**: Add extended due diligence intelligence, unified vision AI, and resilience
+  ([`a679565`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/a679565c9c91ba3089fe3ec0dcdad09f494ea55a))
+
+- **ui**: Complete dashboard audit — comparison, bulk actions, table view, exports, tags & commute
+  matrix
+  ([`40aaccb`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/40aaccb6cd6319906a0ebaaca2b26f3c60b5f7f5))
+
+- **vision**: Sanitize defects, add vision summary & discrepancy alerts, polish UI labels
+  ([`de9a71d`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/de9a71d4560a6a482c395e81690c0da0aa244ec7))
+
+
 ## v1.15.2 (2026-09-17)
 
 ### Bug Fixes
