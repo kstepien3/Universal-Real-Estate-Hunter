@@ -671,7 +671,12 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
 
     dist_center: float | None = None
     commute_min: int | None = None
-    if city_center_coords is not None:
+    osrm_km = _prop(listing, "commute_drive_km", None)
+    osrm_min = _prop(listing, "commute_drive_min", None)
+    if osrm_km is not None and osrm_min is not None:
+        dist_center = float(osrm_km)
+        commute_min = int(osrm_min)
+    elif city_center_coords is not None:
         dist_center = haversine_km(flat, flon, city_center_coords[0], city_center_coords[1])
         commute_min = max(5, round(dist_center * 1.5 + 4))
 

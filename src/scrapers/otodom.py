@@ -440,7 +440,7 @@ class OtodomScraper(BaseScraper):
                         except ValueError:
                             pass
 
-            # Private owner extraction
+            # Private owner & Agency/Developer extraction
             is_private_owner = None
             raw_owner = item.get("ownerType") or (
                 target.get("Advertiser_type") if "target" in locals() and target else None
@@ -451,6 +451,30 @@ class OtodomScraper(BaseScraper):
                     is_private_owner = True
                 elif "AGENCY" in o_str or "BIURO" in o_str or "DEVELOPER" in o_str or "DEWELOPER" in o_str:
                     is_private_owner = False
+
+            agency_data = (detail_data.get("agency") if detail_data else None) or item.get("agency")
+            developer_data = (detail_data.get("developer") if detail_data else None) or item.get("developer")
+            advertiser_data = (detail_data.get("advertiser") if detail_data else None) or item.get("advertiser")
+
+            extracted_dev_name: str | None = None
+            extracted_dev_nip: str | None = None
+
+            if isinstance(developer_data, dict) and developer_data.get("name"):
+                extracted_dev_name = str(developer_data["name"]).strip()
+                tax_num = developer_data.get("taxNumber") or developer_data.get("nip")
+                if tax_num:
+                    clean_tax = re.sub(r"\D", "", str(tax_num))
+                    if len(clean_tax) == 10:
+                        extracted_dev_nip = clean_tax
+            elif isinstance(agency_data, dict) and agency_data.get("name"):
+                extracted_dev_name = str(agency_data["name"]).strip()
+                tax_num = agency_data.get("taxNumber") or agency_data.get("nip")
+                if tax_num:
+                    clean_tax = re.sub(r"\D", "", str(tax_num))
+                    if len(clean_tax) == 10:
+                        extracted_dev_nip = clean_tax
+            elif isinstance(advertiser_data, dict) and advertiser_data.get("name"):
+                extracted_dev_name = str(advertiser_data["name"]).strip()
 
             # Category
             from src.models.enums import PropertyCategory
@@ -508,6 +532,8 @@ class OtodomScraper(BaseScraper):
                 main_image_url=main_image_url,
                 gallery_images=gallery_images,
                 physical_fingerprint=physical_fp,
+                developer_name=extracted_dev_name,
+                developer_nip=extracted_dev_nip,
                 created_at=created_at,
                 scraped_at=datetime.now(UTC),
                 skip_detail=detail_skipped,

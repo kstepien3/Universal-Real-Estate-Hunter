@@ -240,6 +240,49 @@ function renderLandAuditHtml(item) {
                     </tbody>
                 </table>
                 <div class="nego-note">${negoNoteHtml}</div>
+                <div class="mortgage-sim-box">
+                    <div class="mortgage-sim-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h10M7 11h10M7 15h4M15 15h2"/></svg>
+                        <span>Kalkulator raty kredytu (symulacja finansowa)</span>
+                    </div>
+                    <div class="mortgage-grid">
+                        <div class="mortgage-field">
+                            <label for="mortgageBasePrice">Kwota bazowa (PLN)</label>
+                            <input type="number" id="mortgageBasePrice" value="${Math.round(tco.total_acquisition_cost || item.price || 800000)}" step="10000" oninput="recalcMortgage()">
+                        </div>
+                        <div class="mortgage-field">
+                            <label for="mortgageOwnPct">Wkład własny (%)</label>
+                            <input type="number" id="mortgageOwnPct" value="20" min="10" max="90" step="5" oninput="recalcMortgage()">
+                        </div>
+                        <div class="mortgage-field">
+                            <label for="mortgageYears">Okres spłaty</label>
+                            <select id="mortgageYears" onchange="recalcMortgage()">
+                                <option value="15">15 lat</option>
+                                <option value="20">20 lat</option>
+                                <option value="25" selected>25 lat</option>
+                                <option value="30">30 lat</option>
+                            </select>
+                        </div>
+                        <div class="mortgage-field">
+                            <label for="mortgageRate">Oprocentowanie (%)</label>
+                            <input type="number" id="mortgageRate" value="7.2" step="0.1" min="1" max="25" oninput="recalcMortgage()">
+                        </div>
+                    </div>
+                    <div class="mortgage-results" id="mortgageResultsBox">
+                        <div class="mortgage-res-item">
+                            <span class="mortgage-res-label">Rata miesięczna</span>
+                            <span class="mortgage-res-value" id="mortgageMonthlyPay">— zł</span>
+                        </div>
+                        <div class="mortgage-res-item">
+                            <span class="mortgage-res-label">Kredyt / Wkład</span>
+                            <span class="mortgage-res-sub" id="mortgageLoanAmount">—</span>
+                        </div>
+                        <div class="mortgage-res-item">
+                            <span class="mortgage-res-label">Koszt odsetek</span>
+                            <span class="mortgage-res-sub" id="mortgageTotalInterest">—</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
     }
@@ -257,6 +300,23 @@ function renderLandAuditHtml(item) {
             </div>
         `).join('');
 
+        const customCommute = item.commute_custom || {};
+        const customEntries = Object.entries(customCommute);
+        const customCommuteHtml = customEntries.length
+            ? `<div class="custom-commute-box">
+                    <div class="custom-commute-title">Twoje cele dojazdów (OSRM)</div>
+                    <table class="dd-table">
+                        <tbody>
+                            ${customEntries.map(([label, v]) => `
+                            <tr>
+                                <th>${escapeHtml(label)}</th>
+                                <td class="value"><span class="num">${Math.round(v.min)} min</span> · ${Number(v.km).toFixed(1)} km</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+               </div>`
+            : '';
+
         commuteHtml = `
             <div class="audit-block">
                 <div class="audit-block-head">
@@ -264,6 +324,7 @@ function renderLandAuditHtml(item) {
                     <span class="audit-verdict-badge ${getSeverityBadgeClass(commute.severity)}">${escapeHtml(commute.verdict)}</span>
                 </div>
                 <div class="audit-finding-list">${commuteFindings}</div>
+                ${customCommuteHtml}
                 <div class="audit-actions">
                     ${(item.latitude && item.longitude) ? `
                     <a href="https://www.google.com/maps/dir/?api=1&destination=${item.latitude},${item.longitude}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Wyznacz trasę dojazdu w Google Maps">
@@ -395,11 +456,190 @@ function renderLandAuditHtml(item) {
         `;
     }
 
+    // 6. GUNB building permits (200 m radius)
+    let gunbHtml = '';
+    if (item.gunb_status || (item.gunb_permits && item.gunb_permits.length) || (item.gunb_risk_flags && item.gunb_risk_flags.length)) {
+        const gunbStatus = item.gunb_status || 'BRAK_DANYCH';
+        const gunbCls = /RYZYKO/.test(gunbStatus) ? 'row-danger' : (/BRAK_DANYCH/.test(gunbStatus) ? '' : 'row-ok');
+        const gunbBadge = /RYZYKO/.test(gunbStatus) ? 'audit-verdict-danger' : (/BRAK_DANYCH/.test(gunbStatus) ? 'audit-verdict-warning' : 'audit-verdict-success');
+        const gunbPermits = (item.gunb_permits || []).slice(0, 5).map(p => {
+            const nr = escapeHtml(p.numer_decyzji || p.numer || '—');
+            const zam = escapeHtml(p.nazwa_zamierzenia || p.zamierzenie || '');
+            return `<tr><th>${nr}</th><td class="value">${zam}</td></tr>`;
+        }).join('');
+        const gunbFlags = (item.gunb_risk_flags || []).map(f => `<tr class="row-danger"><th>Ryzyko</th><td class="value">${escapeHtml(f)}</td></tr>`).join('');
+        gunbHtml = `
+            <div class="audit-block">
+                <div class="audit-block-head">
+                    <div class="audit-block-title">Pozwolenia na budowę w sąsiedztwie (GUNB/RWDZ, 200 m)</div>
+                    <span class="audit-verdict-badge ${gunbBadge}">${escapeHtml(gunbStatus)}</span>
+                </div>
+                <table class="dd-table">
+                    ${gunbFlags || (gunbPermits ? '' : `<tr class="${gunbCls}"><th>Status</th><td class="value">Brak danych o pozwoleniach w rejestrze</td></tr>`)}
+                    ${gunbPermits}
+                </table>
+                ${item.gunb_url ? `
+                <div class="audit-actions">
+                    <a href="${escapeHtml(item.gunb_url)}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz wyszukiwarkę GUNB dla tej działki">
+                        ${svgIcon('external')} Wyszukiwarka GUNB
+                    </a>
+                </div>` : ''}
+            </div>
+        `;
+    }
+
+    // 7. Vision AI photo audit (Living Quarters)
+    let visionHtml = '';
+    if (item.vision_finish_condition) {
+        const isUnknown = item.vision_finish_condition === 'NIEZNANY';
+        const vRow = item.vision_is_render === true ? 'row-warn' : (isUnknown ? 'row-neutral' : 'row-ok');
+        const vBadge = item.vision_is_render === true ? 'audit-verdict-warning' : (isUnknown ? 'audit-verdict-muted' : 'audit-verdict-success');
+        const formatFinishConditionLabel = (val) => {
+            if (!val) return '';
+            const norm = String(val).trim().toUpperCase();
+            const map = {
+                'DO_ZAMIESZKANIA': 'Do zamieszkania',
+                'DO_WYKONCZENIA': 'Do wykończenia',
+                'DEWELOPERSKI': 'Stan deweloperski',
+                'SUROWY': 'Stan surowy',
+                'DO_REMONTU': 'Do remontu',
+                'NIEZNANY': 'Nieznany'
+            };
+            if (map[norm]) return map[norm];
+            return norm.replace(/_/g, ' ').toLowerCase().replace(/^\w/, c => c.toUpperCase());
+        };
+        const vConditionLabel = formatFinishConditionLabel(item.vision_finish_condition);
+        const vVerdict = item.vision_is_render === true ? 'WIZUALIZACJE 3D' : vConditionLabel;
+        const fp = item.vision_floorplan_details || {};
+        const formatVisionDefect = (d) => {
+            if (!d) return '';
+            if (typeof d === 'string') return d;
+            if (typeof d === 'object') {
+                const desc = d.description || d.defect || d.defect_type || d.wada || d.note || d.name || '';
+                const photo = (d.photo_id !== undefined && d.photo_id !== null)
+                    ? d.photo_id
+                    : ((d.photo_index !== undefined && d.photo_index !== null)
+                        ? d.photo_index
+                        : ((d.image_index !== undefined && d.image_index !== null)
+                            ? d.image_index
+                            : ((d.image_id !== undefined && d.image_id !== null) ? d.image_id : null)));
+                const prefix = photo !== null ? `[Zdjęcie ${photo}] ` : '';
+                return (prefix + (desc || Object.values(d).filter(v => typeof v === 'string' || typeof v === 'number').join(' — '))).trim();
+            }
+            return String(d);
+        };
+        const defects = (item.vision_defects || []).map(d => `<tr><th>Wada</th><td class="value">${escapeHtml(formatVisionDefect(d))}</td></tr>`).join('');
+        const summaryHtml = item.vision_summary ? `
+            <div class="audit-summary-note" style="margin: 8px 0 12px 0; padding: 10px 14px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--accent, #3b82f6); border-radius: 4px; font-size: 13px; line-height: 1.5; color: var(--text, #e2e8f0);">
+                <span style="font-size: 14px; margin-right: 4px;">💬</span> <em>${escapeHtml(item.vision_summary)}</em>
+            </div>
+        ` : '';
+        const discrepancyRow = item.vision_discrepancy_note ? `
+            <tr class="row-warn">
+                <th>Rozbieżność z opisem</th>
+                <td class="value"><span style="color: var(--yellow, #f59e0b); font-weight: 600;">⚠️ ${escapeHtml(item.vision_discrepancy_note)}</span></td>
+            </tr>
+        ` : '';
+        visionHtml = `
+            <div class="audit-block">
+                <div class="audit-block-head">
+                    <div class="audit-block-title">Audyt zdjęć (Vision AI)</div>
+                    <span class="audit-verdict-badge ${vBadge}">${escapeHtml(vVerdict)}</span>
+                </div>
+                ${summaryHtml}
+                <table class="dd-table">
+                    <tr class="${vRow}"><th>Stan ze zdjęć</th><td class="value">${escapeHtml(vConditionLabel)}${item.vision_is_render === true ? ' — zdjęcia to rendery, stan faktyczny do weryfikacji na żywo' : ''}</td></tr>
+                    ${discrepancyRow}
+                    ${fp.orientation ? `<tr><th>Rzut: orientacja</th><td class="value">${escapeHtml(fp.orientation)}</td></tr>` : ''}
+                    ${fp.usability_score ? `<tr><th>Rzut: ustawność</th><td class="value"><span class="num">${fp.usability_score}/10</span>${fp.room_layout_notes ? ` — ${escapeHtml(fp.room_layout_notes)}` : ''}</td></tr>` : ''}
+                    ${defects}
+                </table>
+            </div>
+        `;
+    }
+
+    // 8. Developer / KRS background check
+    let developerHtml = '';
+    if (item.developer_name || item.developer_nip || item.developer_krs || item.developer_risk_level || item.is_private_owner) {
+        const devLevel = (item.developer_risk_level || (item.is_private_owner ? 'PRIVATE' : 'NIEZNANE')).toUpperCase();
+        let devBadge = 'audit-verdict-warning';
+        let devCls = 'row-warn';
+        let devLabel = devLevel;
+
+        if (devLevel === 'PRIVATE') {
+            devBadge = 'audit-verdict-info';
+            devCls = 'row-ok';
+            devLabel = 'OFERTA PRYWATNA';
+        } else if (devLevel === 'LOW') {
+            devBadge = 'audit-verdict-success';
+            devCls = 'row-ok';
+            devLabel = 'NISKIE RYZYKO';
+        } else if (devLevel === 'HIGH') {
+            devBadge = 'audit-verdict-danger';
+            devCls = 'row-danger';
+            devLabel = 'WYSOKIE RYZYKO';
+        } else if (devLevel === 'MEDIUM') {
+            devBadge = 'audit-verdict-warning';
+            devCls = 'row-warn';
+            devLabel = 'ŚREDNIE RYZYKO';
+        } else if (devLevel === 'BRAK_NIP') {
+            devBadge = 'audit-verdict-warning';
+            devCls = 'row-warn';
+            devLabel = 'BRAK NIP (DO WERYFIKACJI)';
+        } else {
+            devBadge = 'audit-verdict-warning';
+            devCls = 'row-warn';
+            devLabel = 'NIEZWERYFIKOWANY';
+        }
+
+        const devReasons = (item.developer_risk_reasons || []).map(r => `<tr class="${devLevel === 'LOW' || devLevel === 'PRIVATE' ? 'row-ok' : 'row-warn'}"><th>Ocena</th><td class="value">${escapeHtml(r)}</td></tr>`).join('');
+
+        let searchLink = null;
+        let searchLabel = 'Wyszukiwarka KRS';
+        if (item.developer_krs) {
+            searchLink = `https://rejestr.io/krs?q=${encodeURIComponent(item.developer_krs)}`;
+            searchLabel = `KRS: ${escapeHtml(item.developer_krs)}`;
+        } else if (item.developer_nip) {
+            searchLink = `https://rejestr.io/krs?q=${encodeURIComponent(item.developer_nip)}`;
+            searchLabel = `Szukaj NIP: ${escapeHtml(item.developer_nip)}`;
+        } else if (item.developer_name && devLevel !== 'PRIVATE') {
+            searchLink = `https://rejestr.io/krs?q=${encodeURIComponent(item.developer_name)}`;
+            searchLabel = `Szukaj podmiotu w KRS / Rejestr.io`;
+        }
+
+        developerHtml = `
+            <div class="audit-block">
+                <div class="audit-block-head">
+                    <div class="audit-block-title">Deweloper / sprzedawca (KRS)</div>
+                    <span class="audit-verdict-badge ${devBadge}">${escapeHtml(devLabel)}</span>
+                </div>
+                <table class="dd-table">
+                    ${item.developer_name ? `<tr><th>Podmiot / Sprzedawca</th><td class="value">${escapeHtml(item.developer_name)}</td></tr>` : (item.is_private_owner ? `<tr><th>Typ sprzedaży</th><td class="value">Bezpośrednio od właściciela (osoba fizyczna)</td></tr>` : '')}
+                    ${item.developer_nip ? `<tr><th>NIP</th><td class="value"><span class="num">${escapeHtml(item.developer_nip)}</span></td></tr>` : ''}
+                    ${item.developer_krs ? `<tr><th>KRS</th><td class="value"><span class="num">${escapeHtml(item.developer_krs)}</span></td></tr>` : ''}
+                    ${item.developer_capital_pln ? `<tr><th>Kapitał zakładowy</th><td class="value"><span class="num">${Number(item.developer_capital_pln).toLocaleString('pl-PL')} zł</span></td></tr>` : ''}
+                    ${item.developer_registration_year ? `<tr><th>Rok rejestracji</th><td class="value"><span class="num">${item.developer_registration_year}</span></td></tr>` : ''}
+                    <tr class="${devCls}"><th>Status weryfikacji</th><td class="value">${escapeHtml(devLabel)}</td></tr>
+                    ${devReasons}
+                </table>
+                ${searchLink ? `
+                <div class="audit-actions" style="margin-top:8px;">
+                    <a href="${searchLink}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Sprawdź podmiot w bazie Rejestr.io / KRS">
+                        ${svgIcon('external')} ${searchLabel}
+                    </a>
+                </div>` : ''}
+            </div>
+        `;
+    }
+
     return `
         ${legalHtml}
         ${tcoHtml}
         ${commuteHtml}
         ${poiHtml}
+        ${gunbHtml}
+        ${visionHtml}
+        ${developerHtml}
         ${riskHtml}
         ${gesutHtml}
     `;
@@ -424,7 +664,7 @@ function getSeverityBadgeClass(sev) {
 // ========================
 let currentAiItem = null;
 
-async function openAiModal(listingId) {
+async function openAiModal(listingId, forceRefresh = false) {
     const item = allListings.find(i => i.id === listingId);
     if (!item) return;
     currentAiItem = item;
@@ -435,8 +675,8 @@ async function openAiModal(listingId) {
 
     document.getElementById('aiModalTitle').innerText = item.title || '';
 
-    // Lazy-load the full audit payload (land_audit, negotiation_arguments) once.
-    if (!item._detailLoaded) {
+    // Lazy-load the full audit payload (land_audit, negotiation_arguments).
+    if (!item._detailLoaded || forceRefresh) {
         try {
             const full = await Transport.listingDetail(listingId);
             if (full && typeof full === 'object') {
@@ -491,12 +731,29 @@ async function openAiModal(listingId) {
         `;
     }
 
-    // Spatial / financial / legal audit
+    // Spatial / financial / legal / vision intelligence audit
     const spatialSection = document.getElementById('aiSpatialSection');
     const spatialContent = document.getElementById('aiSpatialContent');
-    if (item.parcel_id || item.mpzp_zone || item.flood_risk_zone || item.geoportal_url || (item.latitude && item.longitude) || item.land_audit) {
+    const hasSpatialOrIntel = Boolean(
+        item.parcel_id
+        || item.mpzp_zone
+        || item.flood_risk_zone
+        || item.geoportal_url
+        || (item.latitude && item.longitude)
+        || item.land_audit
+        || item.vision_finish_condition
+        || (item.gunb_permits && item.gunb_permits.length)
+        || (item.gunb_risk_flags && item.gunb_risk_flags.length)
+        || item.developer_name
+        || item.developer_nip
+        || item.developer_risk_level
+        || item.is_private_owner
+        || (item.commute_drive_min !== null && item.commute_drive_min !== undefined)
+    );
+    if (hasSpatialOrIntel) {
         spatialSection.style.display = 'flex';
         spatialContent.innerHTML = renderLandAuditHtml(item);
+        recalcMortgage();
     } else {
         spatialSection.style.display = 'none';
     }
@@ -939,10 +1196,14 @@ async function triggerAiAuditForCurrentItem() {
             throw new Error(err.error || `Błąd serwera (${resp.status})`);
         }
         const data = await resp.json();
+        item._detailLoaded = false;
         Object.assign(item, data);
         const inList = allListings.find(i => i.id === item.id);
-        if (inList) Object.assign(inList, data);
-        openAiModal(item.id);
+        if (inList) {
+            inList._detailLoaded = false;
+            Object.assign(inList, data);
+        }
+        await openAiModal(item.id, true);
         showToast('Raport AI został pomyślnie wygenerowany!');
     } catch (err) {
         showToast('Błąd generowania raportu AI: ' + err.message);
@@ -963,3 +1224,41 @@ async function triggerAiAuditForCurrentItem() {
         }
     }
 }
+
+function recalcMortgage() {
+    const priceInput = document.getElementById('mortgageBasePrice');
+    const ownInput = document.getElementById('mortgageOwnPct');
+    const yearsInput = document.getElementById('mortgageYears');
+    const rateInput = document.getElementById('mortgageRate');
+    const monthlyEl = document.getElementById('mortgageMonthlyPay');
+    const loanEl = document.getElementById('mortgageLoanAmount');
+    const interestEl = document.getElementById('mortgageTotalInterest');
+
+    if (!priceInput || !monthlyEl) return;
+
+    const price = Math.max(0, parseFloat(priceInput.value) || 0);
+    const ownPct = Math.min(95, Math.max(0, parseFloat(ownInput ? ownInput.value : 20) || 20));
+    const years = Math.max(1, parseInt(yearsInput ? yearsInput.value : 25, 10) || 25);
+    const annualRate = Math.max(0.1, parseFloat(rateInput ? rateInput.value : 7.2) || 7.2);
+
+    const loanAmount = Math.max(0, price * (1 - ownPct / 100));
+    const monthlyRate = (annualRate / 100) / 12;
+    const totalMonths = years * 12;
+
+    let monthlyPayment = 0;
+    if (loanAmount > 0) {
+        if (monthlyRate > 0) {
+            monthlyPayment = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, totalMonths)) / (Math.pow(1 + monthlyRate, totalMonths) - 1);
+        } else {
+            monthlyPayment = loanAmount / totalMonths;
+        }
+    }
+
+    const totalRepay = monthlyPayment * totalMonths;
+    const totalInterest = Math.max(0, totalRepay - loanAmount);
+
+    monthlyEl.textContent = `${Math.round(monthlyPayment).toLocaleString('pl-PL')} zł / mc`;
+    if (loanEl) loanEl.textContent = `${Math.round(loanAmount).toLocaleString('pl-PL')} zł (wkład: ${Math.round(price * (ownPct / 100)).toLocaleString('pl-PL')} zł)`;
+    if (interestEl) interestEl.textContent = `+${Math.round(totalInterest).toLocaleString('pl-PL')} zł (${Math.round((totalInterest / (loanAmount || 1)) * 100)}%)`;
+}
+window.recalcMortgage = recalcMortgage;

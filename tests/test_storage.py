@@ -367,6 +367,17 @@ async def test_repository_spatial_fields(async_session):
     listing.mpzp_zone = "4.MN: tereny zabudowy mieszkaniowej"
     listing.mpzp_status = "OBOWIĄZUJĄCY"
     listing.flood_risk_zone = "BRAK"
+    listing.gunb_permits = [{"numer": "AB.6740.1.2024", "zamierzenie": "Budynek mieszkalny"}]
+    listing.gunb_risk_flags = ["Brak uciążliwych pozwoleń"]
+    listing.gunb_url = "https://wyszukiwarka.gunb.gov.pl/?id=186301_1.0221.2296/2"
+    listing.gunb_status = "POZWOLENIA_STANDARDOWE"
+    listing.vision_is_render = False
+    listing.vision_finish_condition = "DO_ZAMIESZKANIA"
+    listing.commute_drive_min = 18
+    listing.commute_drive_km = 12.4
+    listing.pedestrian_sidewalk = True
+    listing.developer_name = "Deweloper Budowlany Sp. z o.o."
+    listing.developer_risk_level = "LOW"
 
     filt_res = FilterResult(
         is_qualified=True,
@@ -385,12 +396,24 @@ async def test_repository_spatial_fields(async_session):
     assert model.mpzp_zone == "4.MN: tereny zabudowy mieszkaniowej"
     assert model.mpzp_status == "OBOWIĄZUJĄCY"
     assert model.flood_risk_zone == "BRAK"
+    assert model.gunb_permits == [{"numer": "AB.6740.1.2024", "zamierzenie": "Budynek mieszkalny"}]
+    assert model.gunb_risk_flags == ["Brak uciążliwych pozwoleń"]
+    assert model.gunb_status == "POZWOLENIA_STANDARDOWE"
+    assert model.vision_is_render is False
+    assert model.vision_finish_condition == "DO_ZAMIESZKANIA"
+    assert model.commute_drive_min == 18
+    assert model.developer_name == "Deweloper Budowlany Sp. z o.o."
+    assert model.developer_risk_level == "LOW"
 
     loaded = await repo.get_by_url(listing.url)
     assert loaded is not None
     assert loaded.mpzp_zone == "4.MN: tereny zabudowy mieszkaniowej"
     assert loaded.mpzp_status == "OBOWIĄZUJĄCY"
     assert loaded.flood_risk_zone == "BRAK"
+    assert loaded.gunb_permits == [{"numer": "AB.6740.1.2024", "zamierzenie": "Budynek mieszkalny"}]
+    assert loaded.vision_is_render is False
+    assert loaded.commute_drive_min == 18
+    assert loaded.developer_name == "Deweloper Budowlany Sp. z o.o."
 
 
 @pytest.mark.asyncio
@@ -555,3 +578,34 @@ def test_resolve_database_url_auto_detect(monkeypatch):
     upgraded = resolve_database_url()
     assert "postgresql" in upgraded
     assert "estate_hunter" in upgraded
+
+
+def test_listing_model_vision_defects_property_normalizes_dicts() -> None:
+    """ListingModel.vision_defects getter and setter must normalize raw dicts to clean strings."""
+    from src.storage.models import ListingModel
+
+    listing = ListingModel()
+    listing._vision_defects = '[{"photo_id": 0, "description": "Słup wysokiego napięcia."}, "Zwykły tekst"]'
+    assert listing.vision_defects == [
+        "[Zdjęcie 0] Słup wysokiego napięcia.",
+        "Zwykły tekst",
+    ]
+
+    listing.vision_defects = [{"photo_index": 1, "defect": "Pęknięcie tynku"}]
+    assert listing.vision_defects == ["[Zdjęcie 1] Pęknięcie tynku"]
+    assert listing._vision_defects == '["[Zdjęcie 1] Pęknięcie tynku"]'
+
+
+def test_listing_model_vision_summary_and_discrepancy_fields() -> None:
+    """ListingModel must store and return vision_summary and vision_discrepancy_note."""
+    from src.storage.models import ListingModel
+
+    listing = ListingModel()
+    listing.vision_summary = "Wnętrze w pełni wykończone; do wykonania ogród i taras."
+    listing.vision_discrepancy_note = "W opisie deklarowano stan deweloperski, a zdjęcia pokazują pełne wykończenie."
+
+    assert listing.vision_summary == "Wnętrze w pełni wykończone; do wykonania ogród i taras."
+    assert (
+        listing.vision_discrepancy_note
+        == "W opisie deklarowano stan deweloperski, a zdjęcia pokazują pełne wykończenie."
+    )

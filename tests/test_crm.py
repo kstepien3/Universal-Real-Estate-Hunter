@@ -55,6 +55,7 @@ async def test_crm_status_and_notes(test_session: AsyncSession):
     model, is_new, _ = await repo.save_or_update(listing, filt_res)
     assert model.user_status == "NEW"
     assert model.user_notes is None
+    assert model.user_tags == []
 
     # Test update status to FAVORITE
     updated = await repo.update_user_status(model.id, UserCRMStatus.FAVORITE.value)
@@ -65,6 +66,11 @@ async def test_crm_status_and_notes(test_session: AsyncSession):
     updated = await repo.update_user_notes(model.id, "Zadzwoń do agenta w poniedziałek o 10:00")
     assert updated is not None
     assert updated.user_notes == "Zadzwoń do agenta w poniedziałek o 10:00"
+
+    # Test custom tags round-trip (JSON serialized column)
+    updated = await repo.update_user_tags(model.id, ["do negocjacji", "zadzwonić"])
+    assert updated is not None
+    assert updated.user_tags == ["do negocjacji", "zadzwonić"]
 
     # Test update status to TO_VISIT
     updated = await repo.update_user_status(model.id, UserCRMStatus.TO_VISIT.value)
@@ -157,6 +163,19 @@ async def test_live_dashboard_crm_endpoints():
             notes_data = await notes_resp.json()
             assert notes_data["success"] is True
             assert notes_data["user_notes"] == "Notatka testowa z poziomu API"
+
+            # Test PATCH /api/listings/{id}/tags
+            tags_resp = await client.patch(
+                f"/api/listings/{target_id}/tags", json={"tags": ["faworyt żony", "wąska działka"]}
+            )
+            assert tags_resp.status == 200
+            tags_data = await tags_resp.json()
+            assert tags_data["success"] is True
+            assert tags_data["user_tags"] == ["faworyt żony", "wąska działka"]
+
+            # Invalid tags payload -> 400
+            bad_resp = await client.patch(f"/api/listings/{target_id}/tags", json={"tags": "not-a-list"})
+            assert bad_resp.status == 400
 
 
 @pytest.mark.asyncio

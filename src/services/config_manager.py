@@ -248,6 +248,14 @@ class CapexSettings(BaseModel):
     pcc_exempt_first_home: bool = False
 
 
+class CommuteDestination(BaseModel):
+    """A user-defined commute anchor (e.g. workplace, school) used by the commute matrix."""
+
+    label: str = ""
+    latitude: float = 0.0
+    longitude: float = 0.0
+
+
 class SearchProfile(BaseModel):
     id: str = "default"
     name: str = "Domy Rzeszów"
@@ -470,7 +478,14 @@ class SearchConfig(BaseModel):
     local_llm_timeout_seconds: float = 120.0
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
     cloud_llm_timeout_seconds: float = 30.0
+    # Vision AI (photo audit). Empty = auto (text-LLM chain, then OPENAI_MODEL).
+    vision_model: str = Field(default_factory=lambda: settings.VISION_MODEL or "")
+    vision_base_url: str = Field(default_factory=lambda: settings.VISION_BASE_URL or "")
+    vision_timeout_seconds: float = Field(
+        default_factory=lambda: getattr(settings, "VISION_TIMEOUT_SECONDS", 120.0) or 120.0
+    )
     capex: CapexSettings = Field(default_factory=CapexSettings)
+    commute_destinations: list[CommuteDestination] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _normalize_local_llm_url(self) -> "SearchConfig":
@@ -502,7 +517,11 @@ class SearchConfig(BaseModel):
                 "local_llm_timeout_seconds",
                 "openrouter_model",
                 "cloud_llm_timeout_seconds",
+                "vision_model",
+                "vision_base_url",
+                "vision_timeout_seconds",
                 "capex",
+                "commute_destinations",
             )
             and hasattr(self, "profiles")
             and self.profiles
@@ -657,6 +676,21 @@ class ConfigManager:
             merged = dict(current_dict.get("capex") or {})
             merged.update(updates["capex"])
             current_dict["capex"] = merged
+        if "commute_destinations" in updates and isinstance(updates["commute_destinations"], list):
+            cleaned_destinations: list[dict[str, Any]] = []
+            for raw in updates["commute_destinations"]:
+                if not isinstance(raw, dict):
+                    continue
+                label = str(raw.get("label", "")).strip()
+                if not label:
+                    continue
+                try:
+                    lat = float(raw.get("latitude", 0.0))
+                    lon = float(raw.get("longitude", 0.0))
+                except (TypeError, ValueError):
+                    continue
+                cleaned_destinations.append({"label": label, "latitude": lat, "longitude": lon})
+            current_dict["commute_destinations"] = cleaned_destinations
         if "llm_analysis_enabled" in updates:
             current_dict["llm_analysis_enabled"] = bool(updates["llm_analysis_enabled"])
         if "llm_provider" in updates and updates["llm_provider"]:
@@ -672,6 +706,16 @@ class ConfigManager:
                 pass
         if "openrouter_model" in updates and updates["openrouter_model"]:
             current_dict["openrouter_model"] = str(updates["openrouter_model"]).strip()
+        # Vision AI: empty string = auto (falls back to the text-LLM chain)
+        if "vision_model" in updates and updates["vision_model"] is not None:
+            current_dict["vision_model"] = str(updates["vision_model"]).strip()
+        if "vision_base_url" in updates and updates["vision_base_url"] is not None:
+            current_dict["vision_base_url"] = str(updates["vision_base_url"]).strip().rstrip("/")
+        if "vision_timeout_seconds" in updates and updates["vision_timeout_seconds"] is not None:
+            try:
+                current_dict["vision_timeout_seconds"] = max(5.0, float(updates["vision_timeout_seconds"]))
+            except (TypeError, ValueError):
+                pass
         if "cloud_llm_timeout_seconds" in updates and updates["cloud_llm_timeout_seconds"] is not None:
             try:
                 current_dict["cloud_llm_timeout_seconds"] = max(5.0, float(updates["cloud_llm_timeout_seconds"]))
@@ -757,6 +801,7 @@ class ConfigManager:
                 "scrapers",
                 "scheduler",
                 "capex",
+                "commute_destinations",
                 "llm_analysis_enabled",
                 "llm_provider",
                 "ollama_model",
@@ -773,6 +818,9 @@ class ConfigManager:
                 "local_llm_timeout_seconds",
                 "openrouter_model",
                 "cloud_llm_timeout_seconds",
+                "vision_model",
+                "vision_base_url",
+                "vision_timeout_seconds",
             )
         }
         if flat_keys and current_dict.get("profiles"):

@@ -29,6 +29,23 @@ def _should_notify(*, is_qualified: bool, is_new: bool, price_changed: bool) -> 
     return is_qualified and (is_new or price_changed)
 
 
+def _get_configured_commute_destinations() -> list[dict[str, Any]]:
+    """Returns user-configured commute anchors as plain dicts, or an empty list."""
+    try:
+        from src.services.config_manager import config_manager
+
+        cfg = config_manager.get_config()
+        destinations = getattr(cfg, "commute_destinations", None) or []
+        return [
+            {"label": d.label, "latitude": d.latitude, "longitude": d.longitude}
+            for d in destinations
+            if getattr(d, "label", "") and getattr(d, "latitude", None) and getattr(d, "longitude", None)
+        ]
+    except Exception as e:
+        logger.debug(f"[Pipeline] Could not resolve commute destinations: {e}")
+        return []
+
+
 async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
     """Audit location via Geoportal and Air Quality, mapping returned fields onto target.
 
@@ -42,11 +59,17 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
         return None
 
     from src.services.air_quality import air_quality_service
+    from src.services.commute import commute_service
+    from src.services.developer_verifier import developer_verifier
     from src.services.geoportal import geoportal_service
+    from src.services.gunb import gunb_service
 
     category = getattr(target, "category", "dom")
     if hasattr(category, "value"):
         category = category.value
+
+    city = getattr(target, "city", None)
+    raw_desc = getattr(target, "raw_description", "") or ""
 
     geo_coro = geoportal_service.audit_location(
         coords[0],
@@ -58,16 +81,37 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
         coords[0],
         coords[1],
     )
+    commute_coro = commute_service.audit_commute_and_pedestrian(
+        lat=coords[0],
+        lon=coords[1],
+        city=city,
+        custom_destinations=_get_configured_commute_destinations(),
+    )
+    seller_name = getattr(target, "developer_name", None) or getattr(target, "contact_person", None)
+    seller_nip = getattr(target, "developer_nip", None)
+    is_priv = getattr(target, "is_private_owner", None)
+    dev_coro = developer_verifier.audit_developer(
+        description=raw_desc,
+        seller_name=seller_name,
+        explicit_nip=seller_nip,
+        is_private_owner=is_priv,
+    )
+
     geo_res: Any
     aq_res: Any
-    geo_res, aq_res = await asyncio.gather(geo_coro, aq_coro, return_exceptions=True)
+    commute_res: Any
+    dev_res: Any
+    geo_res, aq_res, commute_res, dev_res = await asyncio.gather(
+        geo_coro, aq_coro, commute_coro, dev_coro, return_exceptions=True
+    )
 
     geo_audit: dict[str, Any] | None = None
     if isinstance(geo_res, dict):
         geo_audit = geo_res
-        if geo_audit.get("main_parcel_id"):
+        main_pid = geo_audit.get("main_parcel_id")
+        if main_pid:
             if not getattr(target, "parcel_id", None):
-                target.parcel_id = geo_audit["main_parcel_id"]
+                target.parcel_id = main_pid
             target.cadastral_area = geo_audit.get("cadastral_area")
             target.geoportal_url = geo_audit.get("geoportal_url")
             target.mpzp_zone = geo_audit.get("mpzp_zone")
@@ -82,12 +126,119 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
             if hasattr(target, "gesut_networks_data"):
                 target.gesut_networks_data = v
 
+        # Audit GUNB building permits around detected cadastral centroid (200 m radius)
+        cx, cy = geo_audit.get("centroid") or (None, None)
+        try:
+            gunb_res = await gunb_service.audit_gunb_permits(
+                cx=cx,
+                cy=cy,
+                parcel_id=main_pid or getattr(target, "parcel_id", None),
+                radius_m=200.0,
+            )
+            if isinstance(gunb_res, dict):
+                from src.models.listing import GUNB_FIELDS
+
+                apply_if_present(target, gunb_res, GUNB_FIELDS)
+        except Exception as e:
+            logger.debug(f"[Pipeline] GUNB audit note: {e}")
+
     if isinstance(aq_res, dict):
         apply_if_present(target, aq_res, AIR_FIELDS)
         if hasattr(target, "air_smog_risk") and getattr(target, "air_smog_risk", None) is None:
             target.air_smog_risk = "NIEZNANE"
 
+    if isinstance(commute_res, dict):
+        from src.models.listing import COMMUTE_FIELDS
+
+        apply_if_present(target, commute_res, COMMUTE_FIELDS)
+
+    if isinstance(dev_res, dict):
+        from src.models.listing import DEVELOPER_FIELDS
+
+        apply_if_present(target, dev_res, DEVELOPER_FIELDS)
+
+    # Multimodal Vision AI audit (needs no coordinates — photos only).
+    await audit_vision_data(target)
+
     return geo_audit
+
+
+async def audit_vision_data(target: Any) -> dict[str, Any] | None:
+    """Vision AI audit of listing photos (Living Quarters verification).
+
+    Coordinate-independent: runs on gallery/main images alone. Gracefully
+    degrades to NIEZNANY when offline, keyless, or imageless.
+    Returns the vision result dict, or None when skipped.
+    """
+    try:
+        from src.filters.vision_analyzer import declared_finish_label, vision_analyzer
+
+        gallery = list(getattr(target, "gallery_images", None) or [])
+        main_img = getattr(target, "main_image_url", None)
+        if main_img and main_img not in gallery:
+            gallery = [main_img, *gallery]
+        if not gallery:
+            return None
+        existing_finish = getattr(target, "vision_finish_condition", None)
+        if existing_finish and existing_finish != "NIEZNANY":
+            return None
+        import httpx
+
+        async with httpx.AsyncClient() as vision_client:
+            vision_res = await vision_analyzer.audit_images(
+                vision_client,
+                image_urls=gallery[:6],
+                declared_finish=declared_finish_label(target),
+            )
+        if isinstance(vision_res, dict) and vision_res.get("audit_success", True):
+            from src.models.listing import VISION_FIELDS
+
+            vision_payload = {
+                "vision_is_render": vision_res.get("vision_is_render"),
+                "vision_finish_condition": vision_res.get("vision_finish_condition"),
+                "vision_floorplan_details": vision_res.get("vision_floorplan_details"),
+                "vision_defects": vision_res.get("vision_defects"),
+                "vision_summary": vision_res.get("vision_summary"),
+                "vision_discrepancy_note": vision_res.get("discrepancy_note")
+                or vision_res.get("vision_discrepancy_note"),
+            }
+            apply_if_present(target, vision_payload, VISION_FIELDS)
+            return vision_res
+    except Exception as e:
+        logger.debug(f"[Pipeline] Vision audit note: {e}")
+    return None
+
+
+async def audit_developer_data(target: Any) -> dict[str, Any] | None:
+    """Audits seller/developer background via Biała Lista VAT and Open KRS API.
+
+    Coordinate-independent: runs on seller metadata, tax IDs, and ad description.
+    """
+    try:
+        from src.models.listing import DEVELOPER_FIELDS
+        from src.services.developer_verifier import developer_verifier
+
+        existing_risk = getattr(target, "developer_risk_level", None)
+        if existing_risk is not None and existing_risk not in ("NIEZNANE", "BRAK_DANYCH"):
+            return None
+
+        raw_desc = getattr(target, "raw_description", "") or ""
+        seller_name = getattr(target, "developer_name", None) or getattr(target, "contact_person", None)
+        seller_nip = getattr(target, "developer_nip", None)
+        is_priv = getattr(target, "is_private_owner", None)
+
+        dev_res = await developer_verifier.audit_developer(
+            description=raw_desc,
+            seller_name=seller_name,
+            explicit_nip=seller_nip,
+            is_private_owner=is_priv,
+        )
+        if isinstance(dev_res, dict):
+            apply_if_present(target, dev_res, DEVELOPER_FIELDS)
+            return dev_res
+    except Exception as e:
+        logger.debug(f"[Pipeline] Standalone developer audit note: {e}")
+    return None
 
 
 def _log_spatial_summary(target: Any, prefix: str | None = None) -> None:
@@ -253,12 +404,20 @@ class ScraperPipeline:
                 is_exact_coords = bool(existing_model.is_exact_coords)
 
             # Audit location in Geoportal if coords are exact and spatial metrics missing
+            # (extended intelligence fields included so legacy rows get GUNB/Vision/Commute/KRS backfilled)
             needs_spatial_audit = (
                 not listing.parcel_id
                 or getattr(listing, "broadband_status", None) is None
                 or getattr(listing, "parcel_front_width_m", None) is None
                 or getattr(listing, "terrain_slope_pct", None) is None
                 or getattr(listing, "air_pm25_heating_avg", None) is None
+                or getattr(listing, "gunb_status", None) is None
+                or getattr(listing, "commute_drive_min", None) is None
+                or getattr(listing, "developer_risk_level", None) is None
+                or (
+                    bool(getattr(listing, "gallery_images", None) or getattr(listing, "main_image_url", None))
+                    and getattr(listing, "vision_finish_condition", None) is None
+                )
             )
             if listing.coordinates and is_exact_coords and needs_spatial_audit:
                 try:
@@ -267,6 +426,17 @@ class ScraperPipeline:
                         _log_spatial_summary(listing)
                 except Exception as e:
                     logger.debug(f"[Pipeline] Geoportal/AirQuality audit skipped: {e}")
+            else:
+                # Vision and Developer audits need no coordinates: audit photos and
+                # seller/developer even when location is approximate.
+                try:
+                    await audit_vision_data(listing)
+                except Exception as e:
+                    logger.debug(f"[Pipeline] Standalone vision audit skipped: {e}")
+                try:
+                    await audit_developer_data(listing)
+                except Exception as e:
+                    logger.debug(f"[Pipeline] Standalone developer audit skipped: {e}")
 
         # Check if LLM can be skipped because this listing was already analyzed.
         # Uses stable desc_hash (normalized text) + prompt version instead of raw
@@ -917,6 +1087,15 @@ class ScraperPipeline:
                     | ListingModel.air_smog_risk.is_(None)
                     | ListingModel.solar_energy_kwh_m2.is_(None)
                     | ListingModel.geology_formation.is_(None)
+                    | ListingModel.gunb_status.is_(None)
+                    | ListingModel.commute_drive_min.is_(None)
+                    | ListingModel.developer_risk_level.is_(None)
+                    # Vision only when photos exist — imageless rows could never
+                    # fill it and would loop forever.
+                    | (
+                        ListingModel.vision_finish_condition.is_(None)
+                        & ((ListingModel._gallery_images != "[]") | (ListingModel.main_image_url.isnot(None)))
+                    )
                 ),
             )
             .limit(limit)

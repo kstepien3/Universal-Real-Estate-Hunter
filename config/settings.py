@@ -100,5 +100,16 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.1:8b"
 
+    # Vision AI Settings (photo audit: renders, finish condition, floorplans, defects).
+    # The vision model is independent from the text model (text models are not
+    # multimodal). Empty = auto: local base infers qwen2.5vl:7b, cloud base infers
+    # OPENAI_MODEL. Explicit Ollama: VISION_BASE_URL=http://localhost:11434/v1
+    # (bare host gets /v1 appended) + VISION_MODEL one of qwen2.5vl:7b,
+    # llama3.2-vision:11b, minicpm-v:8b, moondream.
+    VISION_MODEL: str | None = None
+    VISION_BASE_URL: str | None = None
+    VISION_API_KEY: str | None = None
+    VISION_TIMEOUT_SECONDS: float = 120.0
+
 
 settings = Settings()

@@ -92,6 +92,14 @@
                     return await ensureOk('/api/listings/' + id + '/notes', jsonOptions('PATCH', { notes: notes }));
                 },
 
+                async updateTags(id, tags) {
+                    return await ensureOk('/api/listings/' + id + '/tags', jsonOptions('PATCH', { tags: tags }));
+                },
+
+                async geocode(query) {
+                    return await ensureOk('/api/geocode', jsonOptions('POST', { query: query }));
+                },
+
                 // Resolves to the status payload, or null when the request failed.
                 async scrapeStatus() {
                     const out = await requestJson('/api/scrape/status');

@@ -1,5 +1,8 @@
+import ast
 import asyncio
+import json
 import os
+import re
 import socket
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -291,6 +294,8 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("is_exact_coords", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
     ("user_status", "VARCHAR(30) DEFAULT 'NEW'", "VARCHAR(30) DEFAULT 'NEW'"),
     ("user_notes", "TEXT", "TEXT"),
+    ("user_tags", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("commute_custom", "TEXT DEFAULT '{}'", "TEXT DEFAULT '{}'"),
     ("finish_condition", "VARCHAR(50) DEFAULT 'nieokreślony'", "VARCHAR(50) DEFAULT 'nieokreślony'"),
     ("has_visualisations", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
     ("sewerage", "VARCHAR(50) DEFAULT 'nieznana'", "VARCHAR(50) DEFAULT 'nieznana'"),
@@ -376,6 +381,34 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("valuation_negotiation_leverage", "VARCHAR(20)", "VARCHAR(20)"),
     ("valuation_fair_market_value", "FLOAT", "DOUBLE PRECISION"),
     ("valuation_opening_offer", "FLOAT", "DOUBLE PRECISION"),
+    # Extended Intelligence: GUNB
+    ("gunb_permits", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("gunb_risk_flags", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("gunb_url", "VARCHAR(500)", "VARCHAR(500)"),
+    ("gunb_status", "VARCHAR(50)", "VARCHAR(50)"),
+    # Extended Intelligence: Vision AI
+    ("vision_is_render", "BOOLEAN", "BOOLEAN"),
+    ("vision_finish_condition", "VARCHAR(50)", "VARCHAR(50)"),
+    ("vision_floorplan_details", "TEXT DEFAULT '{}'", "TEXT DEFAULT '{}'"),
+    ("vision_defects", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("vision_summary", "TEXT", "TEXT"),
+    ("vision_discrepancy_note", "TEXT", "TEXT"),
+    # Extended Intelligence: Commute & Pedestrian Safety
+    ("commute_drive_min", "INTEGER", "INTEGER"),
+    ("commute_drive_km", "FLOAT", "DOUBLE PRECISION"),
+    ("commute_station_min", "INTEGER", "INTEGER"),
+    ("pedestrian_sidewalk", "BOOLEAN", "BOOLEAN"),
+    ("pedestrian_lit", "BOOLEAN", "BOOLEAN"),
+    ("pedestrian_surface", "VARCHAR(50)", "VARCHAR(50)"),
+    ("pedestrian_safety_note", "TEXT", "TEXT"),
+    # Extended Intelligence: Developer & KRS Background Check
+    ("developer_name", "VARCHAR(200)", "VARCHAR(200)"),
+    ("developer_nip", "VARCHAR(20)", "VARCHAR(20)"),
+    ("developer_krs", "VARCHAR(20)", "VARCHAR(20)"),
+    ("developer_capital_pln", "FLOAT", "DOUBLE PRECISION"),
+    ("developer_registration_year", "INTEGER", "INTEGER"),
+    ("developer_risk_level", "VARCHAR(20)", "VARCHAR(20)"),
+    ("developer_risk_reasons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
 ]
 
 
@@ -491,6 +524,119 @@ async def _migrate_database_columns(conn) -> None:
                 sync_conn.execute(text("DELETE FROM spatial_cache WHERE cache_key LIKE 'air_quality:%'"))
             except Exception as e:
                 logger.debug(f"[Database] Air quality stale cleanup note: {e}")
+
+            # Sanitize legacy vision_defects containing JSON objects and fix stringified dicts in cons
+            if "vision_defects" in existing_cols:
+                try:
+                    rows = sync_conn.execute(
+                        text(
+                            "SELECT id, vision_defects, cons FROM listings WHERE vision_defects LIKE '%{%' OR cons LIKE '%🔧 [Vision AI] Wada wizualna: {%';"
+                        )
+                    ).fetchall()
+                    for lid, raw_defects, raw_cons in rows:
+                        clean_defects_json: str | None = None
+                        clean_cons_json: str | None = None
+                        if raw_defects and "{" in str(raw_defects):
+                            try:
+                                parsed = json.loads(raw_defects)
+                                if isinstance(parsed, list):
+                                    clean_list = []
+                                    for d in parsed:
+                                        if isinstance(d, dict):
+                                            desc = (
+                                                d.get("description")
+                                                or d.get("defect")
+                                                or d.get("defect_type")
+                                                or d.get("wada")
+                                                or d.get("note")
+                                                or d.get("name")
+                                                or ""
+                                            )
+                                            photo = (
+                                                d.get("photo_id")
+                                                if d.get("photo_id") is not None
+                                                else (
+                                                    d.get("photo_index")
+                                                    if d.get("photo_index") is not None
+                                                    else (
+                                                        d.get("image_index")
+                                                        if d.get("image_index") is not None
+                                                        else d.get("image_id")
+                                                    )
+                                                )
+                                            )
+                                            prefix = f"[Zdjęcie {photo}] " if photo is not None else ""
+                                            clean_list.append(
+                                                f"{prefix}{desc}".strip() if desc else json.dumps(d, ensure_ascii=False)
+                                            )
+                                        else:
+                                            clean_list.append(str(d).strip())
+                                    clean_defects_json = json.dumps(clean_list, ensure_ascii=False)
+                            except Exception:
+                                pass
+
+                        if raw_cons and "🔧 [Vision AI] Wada wizualna: {" in str(raw_cons):
+                            try:
+                                parsed_cons = json.loads(raw_cons)
+                                if isinstance(parsed_cons, list):
+                                    new_cons = []
+                                    for c in parsed_cons:
+                                        if isinstance(c, str) and "🔧 [Vision AI] Wada wizualna: {" in c:
+                                            m = re.search(r"🔧 \[Vision AI\] Wada wizualna: ({.*})", c)
+                                            if m:
+                                                try:
+                                                    d = ast.literal_eval(m.group(1))
+                                                    desc = (
+                                                        d.get("description")
+                                                        or d.get("defect")
+                                                        or d.get("defect_type")
+                                                        or d.get("wada")
+                                                        or d.get("note")
+                                                        or d.get("name")
+                                                        or ""
+                                                    )
+                                                    photo = (
+                                                        d.get("photo_id")
+                                                        if d.get("photo_id") is not None
+                                                        else (
+                                                            d.get("photo_index")
+                                                            if d.get("photo_index") is not None
+                                                            else (
+                                                                d.get("image_index")
+                                                                if d.get("image_index") is not None
+                                                                else d.get("image_id")
+                                                            )
+                                                        )
+                                                    )
+                                                    prefix = f"[Zdjęcie {photo}] " if photo is not None else ""
+                                                    new_cons.append(
+                                                        f"🔧 [Vision AI] Wada wizualna: {prefix}{desc}".strip()
+                                                    )
+                                                    continue
+                                                except Exception:
+                                                    pass
+                                        new_cons.append(c)
+                                    clean_cons_json = json.dumps(new_cons, ensure_ascii=False)
+                            except Exception:
+                                pass
+
+                        if clean_defects_json and clean_cons_json:
+                            sync_conn.execute(
+                                text("UPDATE listings SET vision_defects = :vdef, cons = :vcons WHERE id = :lid"),
+                                {"vdef": clean_defects_json, "vcons": clean_cons_json, "lid": lid},
+                            )
+                        elif clean_defects_json:
+                            sync_conn.execute(
+                                text("UPDATE listings SET vision_defects = :vdef WHERE id = :lid"),
+                                {"vdef": clean_defects_json, "lid": lid},
+                            )
+                        elif clean_cons_json:
+                            sync_conn.execute(
+                                text("UPDATE listings SET cons = :vcons WHERE id = :lid"),
+                                {"vcons": clean_cons_json, "lid": lid},
+                            )
+                except Exception as e:
+                    logger.debug(f"[Database] Legacy vision_defects cleanup note: {e}")
 
             sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)"))
             sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_desc_hash ON listings (desc_hash)"))

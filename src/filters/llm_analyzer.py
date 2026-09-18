@@ -11,6 +11,12 @@ import httpx
 from loguru import logger
 
 from config import settings
+from src.filters.vision_analyzer import (
+    SUGGESTED_OLLAMA_VISION_MODELS,
+    is_local_vision_base,
+    is_vision_model,
+    resolve_vision_target,
+)
 from src.models.listing import ListingSchema
 
 LLM_MAX_RETRIES = 3
@@ -202,6 +208,9 @@ class LLMAnalyzer:
                 "local_llm_preset",
                 "local_llm_num_ctx",
                 "cloud_llm_timeout_seconds",
+                "vision_model",
+                "vision_base_url",
+                "vision_timeout_seconds",
             )
             for key in supported_fields:
                 val = data.get(key)
@@ -229,6 +238,9 @@ class LLMAnalyzer:
         local_llm_preset: str | None = None,
         local_llm_num_ctx: int | None = None,
         cloud_llm_timeout_seconds: float | None = None,
+        vision_model: str | None = None,
+        vision_base_url: str | None = None,
+        vision_timeout_seconds: float | None = None,
     ) -> None:
         cfg = None
         try:
@@ -338,6 +350,21 @@ class LLMAnalyzer:
         self.local_llm_num_ctx = self.ollama_num_ctx
         self.llm_provider = (
             (llm_provider or (getattr(cfg, "llm_provider", None) if cfg else None) or "auto").lower().strip()
+        )
+        self.vision_model = (
+            str(vision_model).strip()
+            if vision_model is not None
+            else ((getattr(cfg, "vision_model", None) if cfg else None) or "")
+        )
+        self.vision_base_url = (
+            str(vision_base_url).strip()
+            if vision_base_url is not None
+            else ((getattr(cfg, "vision_base_url", None) if cfg else None) or "")
+        )
+        self.vision_timeout_seconds = (
+            float(vision_timeout_seconds)
+            if vision_timeout_seconds is not None
+            else (getattr(cfg, "vision_timeout_seconds", None) if cfg else None)
         )
         self.last_measured_tok_per_sec: float | None = None
         # Metadata of the last successful call (kept off the result dict).
@@ -785,6 +812,26 @@ class LLMAnalyzer:
                     active_provider = providers_map[p_id]
                     break
 
+        installed_union = list(
+            dict.fromkeys([*(ollama_res.get("installed_models") or []), *(local_res.get("installed_models") or [])])
+        )
+        v_base, v_key, v_model = resolve_vision_target(
+            api_base=self.vision_base_url or None,
+            model_name=self.vision_model or None,
+        )
+        v_is_local = is_local_vision_base(v_base)
+        v_installed = [m.split(":")[0].lower() for m in installed_union] + [m.lower() for m in installed_union]
+        v_is_missing_local = bool(
+            v_is_local
+            and v_model
+            and (v_model.split(":")[0].lower() not in v_installed and v_model.lower() not in v_installed)
+        )
+        v_warning: str | None = None
+        if v_is_missing_local:
+            v_warning = f"Model '{v_model}' nie jest pobrany w lokalnej Ollama (uruchom: ollama run {v_model})"
+        elif v_model and "moondream" in v_model.lower():
+            v_warning = "Moondream (1.7B) jest modelem o niskiej precyzji strukturalnej. Do audytu Living Quarters zalecany jest qwen2.5vl:7b lub OpenRouter (google/gemini-2.5-flash)."
+
         return {
             "enabled": bool(self.enabled),
             "configured_provider": self.llm_provider,
@@ -797,6 +844,16 @@ class LLMAnalyzer:
                 "ollama": ollama_res,
             },
             "suggested_models": SUGGESTED_OLLAMA_MODELS,
+            "suggested_vision_models": SUGGESTED_OLLAMA_VISION_MODELS,
+            "installed_vision_models": [m for m in installed_union if is_vision_model(m)],
+            "vision_target": {
+                "base_url": v_base,
+                "model": v_model,
+                "ready": (bool(v_key) or v_is_local) and not v_is_missing_local,
+                "is_local": v_is_local,
+                "timeout": self.vision_timeout_seconds or (120.0 if v_is_local else 45.0),
+                "warning": v_warning,
+            },
         }
 
     @staticmethod
@@ -1027,6 +1084,46 @@ class LLMAnalyzer:
             spatial_lines.append(f"Flood risk (ISOK): {listing.flood_risk_zone}")
         elif listing.parcel_id:
             spatial_lines.append("Flood risk (ISOK): Poza strefą bezpośredniego zagrożenia")
+
+        gunb_flags = list(getattr(listing, "gunb_risk_flags", None) or [])
+        if gunb_flags:
+            spatial_lines.append(f"Pozwolenia GUNB/RWDZ w promieniu 200 m (ryzyko): {' | '.join(gunb_flags[:3])}")
+        elif list(getattr(listing, "gunb_permits", None) or []):
+            spatial_lines.append("Pozwolenia GUNB/RWDZ w promieniu 200 m: wyłącznie standardowe")
+        if getattr(listing, "gunb_url", None):
+            spatial_lines.append(f"Rejestr GUNB: {listing.gunb_url}")
+
+        if getattr(listing, "vision_finish_condition", None):
+            spatial_lines.append(
+                f"Vision AI ze zdjęć: stan {listing.vision_finish_condition}"
+                f"{' (RENDER 3D, nie fotografia)' if getattr(listing, 'vision_is_render', None) else ''}"
+            )
+            for defect in list(getattr(listing, "vision_defects", None) or [])[:3]:
+                spatial_lines.append(f"Vision AI wada: {defect}")
+
+        commute_min = getattr(listing, "commute_drive_min", None)
+        if commute_min is not None:
+            spatial_lines.append(
+                f"Dojazd do centrum (OSRM): {getattr(listing, 'commute_drive_km', None)} km, {commute_min} min"
+            )
+
+        if getattr(listing, "developer_name", None) or getattr(listing, "developer_risk_level", None):
+            dev_reasons = list(getattr(listing, "developer_risk_reasons", None) or [])
+            spatial_lines.append(
+                f"Deweloper/KRS: {listing.developer_name or 'b/d'} "
+                f"(ryzyko: {listing.developer_risk_level or 'NIEZNANE'})"
+                + (f" — {'; '.join(dev_reasons[:2])}" if dev_reasons else "")
+            )
+
+        nearest_poi = getattr(listing, "nearest_poi", None) or {}
+        if isinstance(nearest_poi, dict) and nearest_poi:
+            poi_bits = []
+            for cat in ("edukacja", "sklepy", "transport"):
+                near = nearest_poi.get(cat) or {}
+                if near.get("walk_min") is not None:
+                    poi_bits.append(f"{cat}: {near.get('dist_m')} m (~{near.get('walk_min')} min pieszo)")
+            if poi_bits:
+                spatial_lines.append(f"Infrastruktura piesza (OSM): {'; '.join(poi_bits)}")
 
         if listing.air_aqi is not None or listing.air_pm25_heating_avg is not None:
             aq_parts = []
