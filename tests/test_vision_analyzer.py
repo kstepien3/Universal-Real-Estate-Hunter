@@ -299,3 +299,92 @@ def test_normalize_vision_defects() -> None:
         "Prosty ciąg tekstowy",
         "Wilgoć w piwnicy",
     ]
+
+
+@pytest.mark.asyncio
+async def test_audit_images_timeout_resolution(monkeypatch: pytest.MonkeyPatch):
+    analyzer = VisionAnalyzer()
+    client = AsyncMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"is_render": false, "visual_finish_condition": "DO_ZAMIESZKANIA"}'}}]
+    }
+    client.post.return_value = mock_resp
+    client.get.return_value = MagicMock(status_code=200, content=b"fake", headers={"content-type": "image/jpeg"})
+
+    # 1. Configured timeout from config_manager is respected
+    from src.services.config_manager import config_manager
+
+    cfg = config_manager.get_config()
+    monkeypatch.setattr(cfg, "vision_timeout_seconds", 140.0)
+
+    await analyzer.audit_images(
+        client,
+        image_urls=["data:image/jpeg;base64,dummy"],
+        api_base="http://localhost:11434/v1",
+        model_name="qwen2.5vl:7b",
+    )
+    call_args = client.post.call_args
+    assert call_args.kwargs.get("timeout") == 140.0
+
+    # 2. When config is None, local engine defaults to 120s, cloud to 45s
+    monkeypatch.setattr(cfg, "vision_timeout_seconds", None)
+    from config import settings
+
+    monkeypatch.setattr(settings, "VISION_TIMEOUT_SECONDS", None)
+
+    await analyzer.audit_images(
+        client,
+        image_urls=["data:image/jpeg;base64,dummy"],
+        api_base="http://localhost:11434/v1",
+        model_name="qwen2.5vl:7b",
+    )
+    call_args = client.post.call_args
+    assert call_args.kwargs.get("timeout") == 120.0
+
+    await analyzer.audit_images(
+        client,
+        image_urls=["data:image/jpeg;base64,dummy"],
+        api_base="https://openrouter.ai/api/v1",
+        api_key="sk-test",
+        model_name="google/gemini-2.5-flash",
+    )
+    call_args = client.post.call_args
+    assert call_args.kwargs.get("timeout") == 45.0
+
+    # 3. Explicit timeout passed directly overrides everything
+    await analyzer.audit_images(
+        client,
+        image_urls=["data:image/jpeg;base64,dummy"],
+        api_base="http://localhost:11434/v1",
+        model_name="qwen2.5vl:7b",
+        timeout=185.0,
+    )
+    call_args = client.post.call_args
+    assert call_args.kwargs.get("timeout") == 185.0
+
+
+@pytest.mark.asyncio
+async def test_audit_images_local_engine_filters_unfetched_urls():
+    analyzer = VisionAnalyzer()
+    client = AsyncMock()
+    # Mock client.get failing (e.g. timeout on image CDN)
+    client.get.return_value = MagicMock(status_code=404, content=b"")
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "choices": [{"message": {"content": '{"is_render": false, "visual_finish_condition": "DO_ZAMIESZKANIA"}'}}]
+    }
+    client.post.return_value = mock_resp
+
+    # For local Ollama, failed downloads should NOT be passed as http:// URLs
+    res = await analyzer.audit_images(
+        client,
+        image_urls=["https://external-cdn.com/bad-photo.jpg"],
+        api_base="http://localhost:11434/v1",
+        model_name="qwen2.5vl:7b",
+    )
+    # Since no valid image was downloaded or present as data URI, local engine skips POST and returns safe default
+    assert client.post.call_count == 0
+    assert res["audit_success"] is False

@@ -149,6 +149,14 @@
                         <option value="drop_desc">Obniżki cen</option>
                     </select>
                 </div>
+                <button class="btn btn-sm export-csv-btn" onclick="exportCurrentListingsToCsv()" title="Eksportuj aktualne wyniki do pliku CSV">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    <span>CSV</span>
+                </button>
                 <div class="segmented-switcher" role="group" aria-label="Widok">
                     <button class="view-btn" id="btnViewGrid" onclick="switchViewMode('grid')" title="Siatka kafelków">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -165,6 +173,12 @@
                             <rect x="13" y="3" width="8" height="18" rx="1"></rect>
                         </svg>
                         <span>Split</span>
+                    </button>
+                    <button class="view-btn" id="btnViewTable" onclick="switchViewMode('table')" title="Widok tabelaryczny">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 3h18v18H3zM3 9h18M3 15h18M9 3v18M15 3v18"></path>
+                        </svg>
+                        <span>Tabela</span>
                     </button>
                     <button class="view-btn" id="btnViewMap" onclick="switchViewMode('map')" title="Pełna mapa">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -308,6 +322,16 @@
                         <option value="EXACT">Tylko dokładny punkt / działka</option>
                     </select>
                 </div>
+                <div class="field-group">
+                    <label for="filterCommuteDest">Dojazd do celu (maks.)</label>
+                    <select id="filterCommuteDest" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie cele</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterCommuteMaxMin">Maks. czas dojazdu (min)</label>
+                    <input type="number" id="filterCommuteMaxMin" placeholder="np. 20" min="1" max="180" oninput="debouncedApplyFilters()">
+                </div>
             </div>
         </div>
         </section>
@@ -374,6 +398,13 @@
                         <span>Dopasuj</span>
                     </button>
                 </div>
+                <div class="map-aqi-legend" id="mapAqiLegend" style="display:none;">
+                    <div class="map-aqi-title">Jakość powietrza (PM2.5)</div>
+                    <div class="map-aqi-row"><span class="aqi-swatch aqi-good"></span> &le; 15 µg/m³ (Dobra)</div>
+                    <div class="map-aqi-row"><span class="aqi-swatch aqi-moderate"></span> 16–25 µg/m³ (Umiarkowana)</div>
+                    <div class="map-aqi-row"><span class="aqi-swatch aqi-bad"></span> &gt; 25 µg/m³ (Smog)</div>
+                    <div class="map-aqi-row"><span class="aqi-swatch aqi-unknown"></span> Brak danych</div>
+                </div>
             </div>
             <div class="listings-column">
                 <div class="results-count">
@@ -384,8 +415,85 @@
                         Ładowanie ofert z bazy danych…
                     </div>
                 </div>
+                <div class="listings-table-container" id="listingsTableContainer" style="display:none;">
+                    <table class="listings-table" id="listingsTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 38px; text-align: center;">
+                                    <input type="checkbox" id="selectAllTableCheckbox" onchange="toggleSelectAllVisible(this.checked)" title="Zaznacz wszystkie widoczne">
+                                </th>
+                                <th style="width: 56px;">Foto</th>
+                                <th onclick="sortTableBy('title')" class="sortable-th">Tytuł / Adres</th>
+                                <th onclick="sortTableBy('price')" class="sortable-th">Cena</th>
+                                <th onclick="sortTableBy('price_m2')" class="sortable-th">Cena / m²</th>
+                                <th onclick="sortTableBy('area')" class="sortable-th">Powierzchnia</th>
+                                <th onclick="sortTableBy('plot')" class="sortable-th">Działka</th>
+                                <th onclick="sortTableBy('finish')" class="sortable-th">Stan</th>
+                                <th onclick="sortTableBy('score')" class="sortable-th">Score</th>
+                                <th onclick="sortTableBy('created')" class="sortable-th">Dodano</th>
+                                <th style="width: 110px; text-align: right;">Akcje</th>
+                            </tr>
+                        </thead>
+                        <tbody id="listingsTableBody"></tbody>
+                    </table>
+                </div>
             </div>
         </main>
+    </div>
+
+    <!-- ===== FLOATING BULK ACTIONS BAR ===== -->
+    <div id="bulkActionBar" class="bulk-action-bar" style="display:none;">
+        <div class="bulk-info">
+            Wybrano: <strong id="bulkSelectedCount" class="num">0</strong> ofert
+        </div>
+        <div class="bulk-buttons">
+            <button type="button" class="btn btn-sm btn-primary" onclick="openCompareModal()" id="btnBulkCompare" title="Porównaj zaznaczone oferty (2-4)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
+                <span>Porównaj</span>
+            </button>
+            <button type="button" class="btn btn-sm" onclick="bulkSetStatus('FAVORITE')" title="Dodaj wybrane do ulubionych">
+                ★ Ulubione
+            </button>
+            <button type="button" class="btn btn-sm" onclick="bulkSetStatus('TO_VISIT')" title="Dodaj wybrane do listy wizyt">
+                🚗 Do wizyty
+            </button>
+            <button type="button" class="btn btn-sm" onclick="bulkSetStatus('CHECKED')" title="Oznacz wybrane jako sprawdzone">
+                ✓ Sprawdzone
+            </button>
+            <button type="button" class="btn btn-sm" onclick="bulkSetStatus('REJECTED')" title="Odrzuć wybrane oferty">
+                ✕ Odrzuć
+            </button>
+            <button type="button" class="btn btn-sm" onclick="exportSelectedListingsToCsv()" title="Eksportuj tylko zaznaczone do CSV">
+                📥 CSV
+            </button>
+            <button type="button" class="btn btn-sm btn-ghost" onclick="clearSelectedListings()" title="Odznacz wszystkie">
+                Odznacz
+            </button>
+        </div>
+    </div>
+
+    <!-- ===== SIDE-BY-SIDE COMPARISON MODAL ===== -->
+    <div id="compareModal" class="modal-backdrop compare-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeCompareModal()">
+        <div class="modal-dialog compare-dialog">
+            <div class="modal-header compare-header">
+                <div>
+                    <h2 class="modal-title">Porównanie ofert nieruchomości</h2>
+                    <div class="modal-subtitle" id="compareSubtitle">Zestawienie parametrów technicznych, prawnych i finansowych</div>
+                </div>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" class="btn btn-sm btn-outline" onclick="exportCompareToCsv()" title="Eksportuj porównanie do CSV">📥 Pobierz CSV</button>
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="closeCompareModal()" aria-label="Zamknij porównanie">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 6 6 18"></path>
+                            <path d="m6 6 12 12"></path>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div class="modal-body compare-body" id="compareTableWrapper">
+                <!-- Dynamically populated comparison table -->
+            </div>
+        </div>
     </div>
 
     <!-- ===== TABLET PANE TOGGLE ===== -->
@@ -438,6 +546,7 @@
                 <button type="button" class="config-tab-btn active" id="tabBtnOverview" onclick="switchConfigTab('overview')">Podsumowanie</button>
                 <button type="button" class="config-tab-btn" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">Profile wyszukiwania</button>
                 <button type="button" class="config-tab-btn" id="tabBtnCapex" onclick="switchConfigTab('capex')">Koszty (CAPEX)</button>
+                <button type="button" class="config-tab-btn" id="tabBtnCommute" onclick="switchConfigTab('commute')">Dojazdy</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">Scrapery i portale</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">Harmonogram</button>
                 <button type="button" class="config-tab-btn" id="tabBtnAi" onclick="switchConfigTab('ai')">Analiza AI</button>
@@ -774,6 +883,25 @@
                     </div>
                 </div>
 
+                <!-- TAB: COMMUTE MATRIX -->
+                <div id="configTabCommute" style="display:none;">
+                    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                        Twoje cele dojazdów (np. praca, szkoła dzieci, dom rodziców). Dla każdego punktu
+                        system dolicza realny czas dojazdu OSRM z każdej oferty i pokazuje go w Due Diligence
+                        oraz umożliwia filtrowanie ofert po maksymalnym czasie dojazdu.
+                    </div>
+                    <div id="commuteDestinationsList" class="commute-dest-list"></div>
+                    <div class="commute-dest-add-row">
+                        <input type="text" id="cfgNewDestLabel" class="config-chips-input" placeholder="Nazwa (np. Praca, Szkoła)" style="flex:1 1 180px;">
+                        <input type="text" id="cfgNewDestAddress" class="config-chips-input" placeholder="Adres (np. ul. Ciepłownicza 12, Rzeszów)" style="flex:2 1 260px;">
+                        <button type="button" class="btn btn-sm" id="btnGeocodeDest" onclick="geocodeNewDestination()">Szukaj adresu</button>
+                    </div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+                        Po wyszukaniu adresu współrzędne uzupełnią się automatycznie (możesz je też wpisać ręcznie).
+                        Zmiany zapisują się razem z pozostałymi ustawieniami.
+                    </div>
+                </div>
+
                 <!-- TAB 2: SCRAPERS -->
                 <div id="configTabScrapers" style="display:none;">
                     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
@@ -967,15 +1095,9 @@
                         </div>
                         <div class="config-input-chips-group">
                             <input type="text" id="cfgLocalModel" placeholder="qwen2.5:7b" class="config-chips-input" oninput="onLocalModelInputCustom(this.value)">
-                            <div class="config-chips-btns">
-                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('qwen2.5:7b')">qwen2.5:7b</button>
-                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('bielik:11b-v2.3-instruct')">bielik:11b</button>
-                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('qwen2.5:14b')">qwen2.5:14b</button>
-                                <button type="button" class="btn btn-sm" onclick="setLocalModelChip('llama3.2:3b')">llama3.2:3b</button>
-                            </div>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                            Wybierz z listy zainstalowanych modeli lub wpisz nazwę modelu.
+                            Wybierz z listy zainstalowanych modeli lub wpisz własną nazwę modelu.
                         </div>
 
                         <details style="margin-top:10px;font-size:12px;color:var(--text-muted);background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-md);padding:8px 10px;">
@@ -1041,12 +1163,6 @@
                         </div>
                         <div class="config-input-chips-group">
                             <input type="text" id="cfgVisionModel" placeholder="Auto albo np. google/gemini-2.5-flash / qwen2.5vl:7b" class="config-chips-input" oninput="onVisionModelInputCustom(this.value)">
-                            <div class="config-chips-btns">
-                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('google/gemini-2.5-flash')">gemini-2.5-flash</button>
-                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('qwen2.5vl:7b')">qwen2.5vl:7b</button>
-                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('llama3.2-vision:11b')">llama3.2-vision</button>
-                                <button type="button" class="btn btn-sm" onclick="setVisionModelChip('gpt-4o-mini')">gpt-4o-mini</button>
-                            </div>
                         </div>
                         <div class="config-row2" style="margin-top:8px;">
                             <div class="config-field">
@@ -1057,6 +1173,17 @@
                                         <button type="button" class="btn btn-sm" onclick="setVisionBaseUrlChip('http://localhost:11434')">Lokalna Ollama</button>
                                         <button type="button" class="btn btn-sm" onclick="setVisionBaseUrlChip('https://openrouter.ai/api/v1')">OpenRouter</button>
                                         <button type="button" class="btn btn-sm" onclick="setVisionBaseUrlChip('')">Auto</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="config-field">
+                                <label for="cfgVisionTimeout">Timeout Vision AI (sekundy, np. 120 dla Ollama, 45 dla chmury):</label>
+                                <div class="config-input-chips-group">
+                                    <input type="number" id="cfgVisionTimeout" min="10" max="600" step="5" placeholder="120" class="config-chips-input">
+                                    <div class="config-chips-btns">
+                                        <button type="button" class="btn btn-sm" onclick="document.getElementById('cfgVisionTimeout').value='60'">60s</button>
+                                        <button type="button" class="btn btn-sm" onclick="document.getElementById('cfgVisionTimeout').value='120'">120s</button>
+                                        <button type="button" class="btn btn-sm" onclick="document.getElementById('cfgVisionTimeout').value='180'">180s</button>
                                     </div>
                                 </div>
                             </div>
@@ -1148,6 +1275,9 @@
                     <span class="drawer-sub" id="aiModalTitle"></span>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" id="btnPrintAiAudit" class="btn btn-sm btn-outline" onclick="window.print()" title="Drukuj lub zapisz raport audytu jako PDF">
+                        🖨️ PDF / Drukuj
+                    </button>
                     <button type="button" id="btnGenerateAiAudit" class="btn btn-sm btn-ai-audit" onclick="triggerAiAuditForCurrentItem()" title="Wygeneruj lub odśwież analizę AI dla tej oferty">
                         🤖 Generuj raport AI
                     </button>

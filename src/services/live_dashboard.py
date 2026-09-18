@@ -305,8 +305,10 @@ class LiveDashboardServer:
         self.app.router.add_get("/api/listings/{id}/air-quality", self.handle_get_air_quality)
         self.app.router.add_patch("/api/listings/{id}/status", self.handle_update_status)
         self.app.router.add_patch("/api/listings/{id}/notes", self.handle_update_notes)
+        self.app.router.add_patch("/api/listings/{id}/tags", self.handle_update_tags)
         self.app.router.add_post("/api/listings/{id}/ai-audit", self.handle_generate_ai_audit)
         self.app.router.add_post("/api/geocode/backfill", self.handle_backfill_coords)
+        self.app.router.add_post("/api/geocode", self.handle_geocode_query)
         self.app.router.add_get("/api/scrape/status", self.handle_scrape_status)
         self.app.router.add_post("/api/scrape", self.handle_trigger_scrape)
         self.app.router.add_post("/api/scrape/cancel", self.handle_cancel_scrape)
@@ -624,6 +626,7 @@ class LiveDashboardServer:
         llm_provider = None
         vision_model = None
         vision_base_url = None
+        vision_timeout_seconds = None
         if request.can_read_body and (request.content_length or 0) > 0:
             try:
                 body = await request.json()
@@ -683,6 +686,11 @@ class LiveDashboardServer:
                         vision_model = str(body["vision_model"]).strip()
                     if "vision_base_url" in body:
                         vision_base_url = str(body["vision_base_url"]).strip()
+                    if "vision_timeout_seconds" in body and body["vision_timeout_seconds"] is not None:
+                        try:
+                            vision_timeout_seconds = max(5.0, float(body["vision_timeout_seconds"]))
+                        except (TypeError, ValueError):
+                            pass
             except Exception:
                 pass
 
@@ -704,6 +712,7 @@ class LiveDashboardServer:
             "llm_provider": llm_provider,
             "vision_model": vision_model,
             "vision_base_url": vision_base_url,
+            "vision_timeout_seconds": vision_timeout_seconds,
         }
         analyzer = LLMAnalyzer.from_config(cfg, **overrides)
         res = await analyzer.test_connection()
@@ -1295,6 +1304,7 @@ class LiveDashboardServer:
             "air_smog_risk": item.air_smog_risk,
             "user_status": item.user_status or "NEW",
             "user_notes": item.user_notes or "",
+            "user_tags": item.user_tags,
             "access_road_type": item.access_road_type,
             "market": item.market,
             "finish_condition": item.finish_condition or "nieokreślony",
@@ -1352,6 +1362,7 @@ class LiveDashboardServer:
             "commute_drive_min": item.commute_drive_min,
             "commute_drive_km": item.commute_drive_km,
             "commute_station_min": item.commute_station_min,
+            "commute_custom": item.commute_custom,
             "pedestrian_sidewalk": item.pedestrian_sidewalk,
             "pedestrian_lit": item.pedestrian_lit,
             "pedestrian_surface": item.pedestrian_surface,
@@ -1535,6 +1546,32 @@ class LiveDashboardServer:
             logger.info(f"[LiveDashboard] Listing #{listing_id} notes updated.")
             return web.json_response({"success": True, "id": listing_id, "user_notes": notes})
 
+    async def handle_update_tags(self, request: web.Request) -> web.Response:
+        try:
+            listing_id = int(request.match_info["id"])
+        except (KeyError, ValueError):
+            return web.json_response({"error": "Nieprawidłowy identyfikator oferty"}, status=400)
+        data = await request.json()
+        tags = data.get("tags")
+
+        if not isinstance(tags, list) or any(not isinstance(t, str) for t in tags):
+            return web.json_response({"error": "Pole 'tags' musi być listą tekstów"}, status=400)
+
+        cleaned: list[str] = []
+        for raw in tags:
+            tag = raw.strip()
+            if tag and tag not in cleaned:
+                cleaned.append(tag)
+
+        async with get_session() as session:
+            repo = ListingRepository(session)
+            item = await repo.update_user_tags(listing_id, cleaned)
+            if not item:
+                return web.json_response({"error": "Listing not found"}, status=404)
+            await safe_commit(session)
+            logger.info(f"[LiveDashboard] Listing #{listing_id} tags updated: {cleaned}")
+            return web.json_response({"success": True, "id": listing_id, "user_tags": cleaned})
+
     async def handle_generate_ai_audit(self, request: web.Request) -> web.Response:
         try:
             listing_id = int(request.match_info["id"])
@@ -1675,6 +1712,13 @@ class LiveDashboardServer:
             q_list = insights.get("questions_for_agent") or []
             item._ai_questions = json.dumps(q_list, ensure_ascii=False)
 
+            sq_dict = insights.get("stakeholder_questions") or {}
+            item.stakeholder_questions = sq_dict
+            docs_list = insights.get("documents_to_obtain") or []
+            item.documents_to_obtain = docs_list
+            risks_list = insights.get("structured_risks") or []
+            item.structured_risks = risks_list
+
             if insights.get("contact_phone") and not item.contact_phone:
                 item.contact_phone = str(insights.get("contact_phone"))
             if insights.get("contact_person") and not item.contact_person:
@@ -1721,6 +1765,9 @@ class LiveDashboardServer:
                     "ai_verdict": item.ai_verdict,
                     "worth_interest": item.worth_interest,
                     "ai_questions": q_list,
+                    "stakeholder_questions": sq_dict,
+                    "documents_to_obtain": docs_list,
+                    "structured_risks": risks_list,
                     "contact_phone": item.contact_phone,
                     "contact_person": item.contact_person,
                     "finish_condition": item.finish_condition,
@@ -1729,6 +1776,21 @@ class LiveDashboardServer:
                     "cons": item.cons,
                 }
             )
+
+    async def handle_geocode_query(self, request: web.Request) -> web.Response:
+        """Forward-geocodes an arbitrary address string for the commute matrix editor."""
+        data = await request.json()
+        query = str(data.get("query", "")).strip()
+        if not query:
+            return web.json_response({"error": "Podaj adres do geokodowania"}, status=400)
+
+        from src.services.geocoder import geocoder
+
+        lat, lon, is_exact = await geocoder.geocode(location_raw=query)
+        if lat is None or lon is None:
+            return web.json_response({"error": "Nie udało się odnaleźć lokalizacji dla podanego adresu"}, status=404)
+
+        return web.json_response({"success": True, "latitude": lat, "longitude": lon, "is_exact": is_exact})
 
     async def handle_backfill_coords(self, request: web.Request) -> web.Response:
         from src.services.geocoder import backfill_missing_coordinates

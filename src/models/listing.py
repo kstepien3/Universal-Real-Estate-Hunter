@@ -76,6 +76,7 @@ COMMUTE_FIELDS: tuple[str, ...] = (
     "commute_drive_min",
     "commute_drive_km",
     "commute_station_min",
+    "commute_custom",
     "pedestrian_sidewalk",
     "pedestrian_lit",
     "pedestrian_surface",
@@ -263,6 +264,7 @@ class FilterResult(BaseModel):
     commute_drive_min: int | None = None
     commute_drive_km: float | None = None
     commute_station_min: int | None = None
+    commute_custom: dict[str, dict[str, float]] | None = None
     pedestrian_sidewalk: bool | None = None
     pedestrian_lit: bool | None = None
     pedestrian_surface: str | None = None
@@ -388,6 +390,7 @@ class ListingSchema(BaseModel):
     commute_drive_min: int | None = None
     commute_drive_km: float | None = None
     commute_station_min: int | None = None
+    commute_custom: dict[str, dict[str, float]] | None = None
     pedestrian_sidewalk: bool | None = None
     pedestrian_lit: bool | None = None
     pedestrian_surface: str | None = None

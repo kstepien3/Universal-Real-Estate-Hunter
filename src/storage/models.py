@@ -166,6 +166,7 @@ class ListingModel(Base):
     commute_drive_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     commute_drive_km: Mapped[float | None] = mapped_column(Float, nullable=True)
     commute_station_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    _commute_custom: Mapped[str] = mapped_column("commute_custom", Text, default="{}")
     pedestrian_sidewalk: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     pedestrian_lit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     pedestrian_surface: Mapped[str | None] = mapped_column(String(50), nullable=True)
@@ -183,6 +184,7 @@ class ListingModel(Base):
     # CRM User Actions & Status
     user_status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)
     user_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    _user_tags: Mapped[str] = mapped_column("user_tags", Text, default="[]")
 
     # Qualification & Filtering Pipeline status
     is_qualified: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
@@ -289,6 +291,28 @@ class ListingModel(Base):
     @gallery_images.setter
     def gallery_images(self, value: list[str]):
         self._gallery_images = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def user_tags(self) -> list[str]:
+        try:
+            return json.loads(self._user_tags)
+        except Exception:
+            return []
+
+    @user_tags.setter
+    def user_tags(self, value: list[str]):
+        self._user_tags = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def commute_custom(self) -> dict[str, dict[str, float]]:
+        try:
+            return json.loads(self._commute_custom) if self._commute_custom else {}
+        except Exception:
+            return {}
+
+    @commute_custom.setter
+    def commute_custom(self, value: dict[str, dict[str, float]] | None):
+        self._commute_custom = json.dumps(value or {}, ensure_ascii=False)
 
     @property
     def ai_questions(self) -> list[str]:

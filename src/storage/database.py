@@ -294,6 +294,8 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("is_exact_coords", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
     ("user_status", "VARCHAR(30) DEFAULT 'NEW'", "VARCHAR(30) DEFAULT 'NEW'"),
     ("user_notes", "TEXT", "TEXT"),
+    ("user_tags", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("commute_custom", "TEXT DEFAULT '{}'", "TEXT DEFAULT '{}'"),
     ("finish_condition", "VARCHAR(50) DEFAULT 'nieokreślony'", "VARCHAR(50) DEFAULT 'nieokreślony'"),
     ("has_visualisations", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
     ("sewerage", "VARCHAR(50) DEFAULT 'nieznana'", "VARCHAR(50) DEFAULT 'nieznana'"),

@@ -210,6 +210,7 @@ class LLMAnalyzer:
                 "cloud_llm_timeout_seconds",
                 "vision_model",
                 "vision_base_url",
+                "vision_timeout_seconds",
             )
             for key in supported_fields:
                 val = data.get(key)
@@ -239,6 +240,7 @@ class LLMAnalyzer:
         cloud_llm_timeout_seconds: float | None = None,
         vision_model: str | None = None,
         vision_base_url: str | None = None,
+        vision_timeout_seconds: float | None = None,
     ) -> None:
         cfg = None
         try:
@@ -358,6 +360,11 @@ class LLMAnalyzer:
             str(vision_base_url).strip()
             if vision_base_url is not None
             else ((getattr(cfg, "vision_base_url", None) if cfg else None) or "")
+        )
+        self.vision_timeout_seconds = (
+            float(vision_timeout_seconds)
+            if vision_timeout_seconds is not None
+            else (getattr(cfg, "vision_timeout_seconds", None) if cfg else None)
         )
         self.last_measured_tok_per_sec: float | None = None
         # Metadata of the last successful call (kept off the result dict).
@@ -844,6 +851,7 @@ class LLMAnalyzer:
                 "model": v_model,
                 "ready": (bool(v_key) or v_is_local) and not v_is_missing_local,
                 "is_local": v_is_local,
+                "timeout": self.vision_timeout_seconds or (120.0 if v_is_local else 45.0),
                 "warning": v_warning,
             },
         }
@@ -1098,8 +1106,6 @@ class LLMAnalyzer:
             spatial_lines.append(
                 f"Dojazd do centrum (OSRM): {getattr(listing, 'commute_drive_km', None)} km, {commute_min} min"
             )
-        if getattr(listing, "pedestrian_safety_note", None):
-            spatial_lines.append(f"Dostęp pieszy (OSM): {listing.pedestrian_safety_note}")
 
         if getattr(listing, "developer_name", None) or getattr(listing, "developer_risk_level", None):
             dev_reasons = list(getattr(listing, "developer_risk_reasons", None) or [])

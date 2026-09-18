@@ -23,25 +23,71 @@ def extract_tax_ids(text: str) -> dict[str, str | None]:
     if not text:
         return {"nip": None, "krs": None, "regon": None}
 
-    nip_match = re.search(
-        r"\bNIP[:\s\-]*([0-9]{3}[-\s]?[0-9]{3}[-\s]?[0-9]{2}[-\s]?[0-9]{2}|[0-9]{10})\b", text, re.IGNORECASE
-    )
+    # 1. Look for explicit NIP patterns (3-3-2-2, 3-2-2-3, 10-digit continuous, optional PL)
     nip: str | None = None
-    if nip_match:
-        cand = re.sub(r"\D", "", nip_match.group(1))
+    labeled_nip_pattern = (
+        r"(?:NIP|VAT[\s\-]ID|Tax[\s\-]ID)[\s:]*(?:PL)?[\s]*"
+        r"([0-9]{3}[-\s]?[0-9]{3}[-\s]?[0-9]{2}[-\s]?[0-9]{2}|"
+        r"[0-9]{3}[-\s]?[0-9]{2}[-\s]?[0-9]{2}[-\s]?[0-9]{3}|"
+        r"[0-9]{10})\b"
+    )
+    for m in re.finditer(labeled_nip_pattern, text, re.IGNORECASE):
+        cand = re.sub(r"\D", "", m.group(1))
         if validate_nip_checksum(cand):
             nip = cand
+            break
 
-    krs_match = re.search(r"\bKRS[:\s\-]*([0-9]{1,10})\b", text, re.IGNORECASE)
+    # 2. If no labeled NIP, scan for PL-prefixed 10-digit NIP or standalone 10-digit with valid checksum
+    if not nip:
+        pl_pattern = r"\bPL\s*([0-9]{10})\b"
+        for m in re.finditer(pl_pattern, text, re.IGNORECASE):
+            cand = m.group(1)
+            if validate_nip_checksum(cand):
+                nip = cand
+                break
+
+    # 3. KRS pattern (allows "KRS", "KRS nr", "nr KRS", optional padding)
     krs: str | None = None
+    krs_pattern = r"\b(?:KRS[:\s\.]*(?:nr[:\s\.]*)?|nr\s+KRS[:\s\.]*)([0-9]{1,10})\b"
+    krs_match = re.search(krs_pattern, text, re.IGNORECASE)
     if krs_match:
-        cand_krs = krs_match.group(1).zfill(10)
-        krs = cand_krs
+        krs = krs_match.group(1).zfill(10)
 
-    regon_match = re.search(r"\bREGON[:\s\-]*([0-9]{9}|[0-9]{14})\b", text, re.IGNORECASE)
-    regon: str | None = regon_match.group(1) if regon_match else None
+    # 4. REGON pattern
+    regon: str | None = None
+    regon_pattern = r"\b(?:REGON[:\s\.]*(?:nr[:\s\.]*)?|nr\s+REGON[:\s\.]*)([0-9]{9}|[0-9]{14})\b"
+    regon_match = re.search(regon_pattern, text, re.IGNORECASE)
+    if regon_match:
+        regon = regon_match.group(1)
 
     return {"nip": nip, "krs": krs, "regon": regon}
+
+
+def extract_company_name(text: str) -> str | None:
+    """Extracts corporate seller / developer name (e.g. Sp. z o.o., S.A., Sp. k., Deweloper X)."""
+    if not text:
+        return None
+    # 1. Company with Polish legal form (e.g. "Nowoczesne Osiedle Sp. z o.o.")
+    legal_suffix = r"(?:Sp\.\s*z\s*o\.o\.|Spółka\s+z\s*o\.o\.|S\.A\.|Sp\.\s*k\.|Sp\.\s*j\.|Spółka\s+komandytowa)"
+    corp_pattern = (
+        rf"([A-ZĄĆĘŁŃÓŚŹŻ0-9][a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ0-9\.\-&]+"
+        rf"(?:\s+[A-ZĄĆĘŁŃÓŚŹŻ0-9][a-ząćęłńóśźżA-ZĄĆĘŁŃÓŚŹŻ0-9\.\-&]+)*\s+{legal_suffix})"
+    )
+    m = re.search(corp_pattern, text)
+    if m:
+        cand = m.group(1).strip()
+        cand = cand.split("\n")[-1].strip()
+        if len(cand) >= 5 and not cand.lower().startswith(("sprzedaż", "oferta", "zakup", "niniejsza")):
+            return cand
+
+    # 2. "Deweloper: [Nazwa]" or "Biuro sprzedaży: [Nazwa]"
+    labeled_pattern = r"(?:Deweloper|Inwestor|Biuro\s+sprzedaży|Biuro\s+nieruchomości|Agencja\s+nieruchomości)[\s:]+([A-ZĄĆĘŁŃÓŚŹŻ0-9][\w\s\.\-&]{2,40})"
+    m2 = re.search(labeled_pattern, text, re.IGNORECASE)
+    if m2:
+        cand = m2.group(1).strip().split("\n")[0].strip()
+        if len(cand) >= 3 and not cand.lower().startswith(("poleca", "zaprasza", "oferuje")):
+            return cand
+    return None
 
 
 class DeveloperVerifierService:
@@ -263,35 +309,76 @@ class DeveloperVerifierService:
 
     async def audit_developer(
         self,
-        client: httpx.AsyncClient | None = None,
+        client: httpx.AsyncClient | str | None = None,
         description: str = "",
         seller_name: str | None = None,
+        explicit_nip: str | None = None,
+        is_private_owner: bool | None = None,
     ) -> dict[str, Any]:
         """
         Extracts identifiers from ad description/seller profile and performs due diligence audit.
+        Accepts client as optional first argument or description directly.
         """
+        http_client: httpx.AsyncClient | None = None
+        if isinstance(client, str):
+            # Positional usage: audit_developer(description)
+            description = client
+        elif client is not None:
+            http_client = client
         combined_text = f"{seller_name or ''}\n{description or ''}"
         extracted = extract_tax_ids(combined_text)
 
-        nip = extracted.get("nip")
+        nip = explicit_nip or extracted.get("nip")
         krs = extracted.get("krs")
+
+        # 1. Private individual sellers do not have KRS or company NIP
+        if is_private_owner is True and not nip and not krs:
+            return {
+                "developer_name": None,
+                "developer_nip": None,
+                "developer_krs": None,
+                "developer_capital_pln": None,
+                "developer_registration_year": None,
+                "developer_risk_level": "PRIVATE",
+                "developer_risk_reasons": [
+                    "Oferta bezpośrednia od osoby fizycznej (ogłoszenie prywatne — brak wpisu w KRS)."
+                ],
+            }
 
         vat_data: dict[str, Any] | None = None
         if nip:
-            vat_data = await self.verify_nip_biala_lista(client, nip)
+            vat_data = await self.verify_nip_biala_lista(http_client, nip)
             if vat_data and not krs and vat_data.get("krs"):
                 krs = vat_data["krs"]
 
         krs_data: dict[str, Any] | None = None
         if krs:
-            krs_data = await self.verify_krs(client, krs)
+            krs_data = await self.verify_krs(http_client, krs)
 
-        risk_level, risk_reasons = self.evaluate_risk(vat_data, krs_data)
+        # Detect corporate company name from metadata or text if not fetched from registers
+        detected_company = (
+            (krs_data or {}).get("name")
+            or (vat_data or {}).get("name")
+            or seller_name
+            or extract_company_name(combined_text)
+        )
 
-        comp_name = (krs_data or {}).get("name") or (vat_data or {}).get("name") or seller_name
+        if nip or krs:
+            risk_level, risk_reasons = self.evaluate_risk(vat_data, krs_data)
+        elif detected_company:
+            risk_level = "BRAK_NIP"
+            risk_reasons = [
+                f"Zidentyfikowano podmiot: '{detected_company}', lecz w treści ogłoszenia brak numeru NIP/KRS do automatycznego audytu rejestrowego."
+            ]
+        elif is_private_owner is False:
+            risk_level = "BRAK_NIP"
+            risk_reasons = ["Ogłoszenie agencyjne/deweloperskie bez podanego numeru NIP/KRS."]
+        else:
+            risk_level = "BRAK_DANYCH"
+            risk_reasons = ["Brak danych o deweloperze lub numerze NIP w ogłoszeniu."]
 
         return {
-            "developer_name": comp_name,
+            "developer_name": detected_company,
             "developer_nip": nip,
             "developer_krs": krs,
             "developer_capital_pln": (krs_data or {}).get("capital_pln"),

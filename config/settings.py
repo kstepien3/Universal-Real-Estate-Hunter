@@ -109,6 +109,7 @@ class Settings(BaseSettings):
     VISION_MODEL: str | None = None
     VISION_BASE_URL: str | None = None
     VISION_API_KEY: str | None = None
+    VISION_TIMEOUT_SECONDS: float = 120.0
 
 
 settings = Settings()

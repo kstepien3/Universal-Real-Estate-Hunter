@@ -372,7 +372,7 @@ class VisionAnalyzer:
         "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
     }
 
-    def __init__(self, timeout: float = 60.0):
+    def __init__(self, timeout: float | None = None):
         self.timeout = timeout
 
     async def fetch_image_as_data_uri(
@@ -620,8 +620,12 @@ class VisionAnalyzer:
             elif not isinstance(res, Exception) and res:
                 prepared_images.append(str(res))
             else:
-                # Fallback to original url (e.g. mock tests or where fetch was skipped)
-                prepared_images.append(orig_url)
+                # Ollama/local engines cannot fetch external URLs over the internet.
+                # Only pass through remote HTTP URLs to cloud multimodal APIs (OpenAI, OpenRouter).
+                if not is_local:
+                    prepared_images.append(orig_url)
+                else:
+                    logger.debug(f"[VisionAnalyzer] Skipping un-downloaded image for local engine: {orig_url[:60]}")
 
         if not prepared_images:
             return self.parse_vision_response("", declared_finish=declared_finish, success=False)
@@ -638,7 +642,18 @@ class VisionAnalyzer:
         if target_key:
             headers["Authorization"] = f"Bearer {target_key}"
 
-        req_timeout = timeout or self.timeout or (90.0 if is_local else 60.0)
+        cfg_timeout: float | None = None
+        try:
+            from src.services.config_manager import config_manager
+
+            cfg = config_manager.get_config()
+            cfg_timeout = getattr(cfg, "vision_timeout_seconds", None)
+        except Exception:
+            pass
+        if cfg_timeout is None:
+            cfg_timeout = getattr(settings, "VISION_TIMEOUT_SECONDS", None)
+
+        req_timeout = timeout or self.timeout or cfg_timeout or (120.0 if is_local else 45.0)
 
         try:
             resp = await client.post(

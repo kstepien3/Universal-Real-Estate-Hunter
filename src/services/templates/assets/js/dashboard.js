@@ -1,5 +1,6 @@
         let allListings = [];
         let currentFilter = 'ALL';
+        let currentTagFilter = null;
         let currentViewMode = 'split';
         let map = null;
         let markersGroup = null;
@@ -8,6 +9,7 @@
         let aqiLayerActive = false;
         let coordCounts = {};
         let activeConfig = null;
+        let commuteDestinations = [];
         let fetchEtag = null;
         let lastServerSigs = {};
         let lastFetchAt = 0;
@@ -80,7 +82,8 @@
 
         function ensureMapInitialized() {
             const mw = document.getElementById('mapWrapper');
-            if (mw && mw.offsetWidth === 0 && mw.offsetHeight === 0) return;
+            if (!mw) return;
+            if (mw.offsetWidth === 0 && mw.offsetHeight === 0) return;
             if (map) {
                 setTimeout(() => map.invalidateSize(), 150);
                 return;
@@ -89,7 +92,23 @@
             const center = curProf ? getCityCenter(curProf.city) : [52.0693, 19.4803];
             initLeafletMap(center);
             renderMapMarkers(computeFilteredItems());
-            setTimeout(() => map.invalidateSize(), 200);
+            setTimeout(() => {
+                if (map) {
+                    map.invalidateSize();
+                    fitMapToMarkers();
+                }
+            }, 200);
+        }
+
+        if (typeof window !== 'undefined') {
+            window.addEventListener('resize', () => {
+                if (map) {
+                    map.invalidateSize();
+                } else if (currentViewMode === 'split' || currentViewMode === 'map') {
+                    ensureMapInitialized();
+                }
+                syncViewButtons();
+            });
         }
 
         function syncTabletToggle() {
@@ -101,9 +120,35 @@
             tglMap.classList.toggle('active', mapShown);
         }
 
+        // On sub-1280px screens "split" never renders two panes side by side — it
+        // toggles between list and map. Reflect the *actually shown* pane in the
+        // view switcher instead of keeping a misleading "Split" pill highlighted.
+        function isNarrowViewport() {
+            return window.innerWidth < 1280;
+        }
+
+        function syncViewButtons() {
+            const buttons = {
+                grid: document.getElementById('btnViewGrid'),
+                split: document.getElementById('btnViewSplit'),
+                table: document.getElementById('btnViewTable'),
+                map: document.getElementById('btnViewMap'),
+            };
+            Object.values(buttons).forEach(b => { if (b) b.classList.remove('active'); });
+
+            let effective = currentViewMode;
+            if (isNarrowViewport() && currentViewMode === 'split') {
+                const mapShown = document.body.classList.contains('tablet-pane-map')
+                    || document.body.classList.contains('mobile-map-open');
+                effective = mapShown ? 'map' : 'grid';
+            }
+            const target = buttons[effective];
+            if (target) target.classList.add('active');
+        }
+
         function switchViewMode(mode) {
             currentViewMode = mode;
-            document.body.classList.remove('mode-grid', 'mode-split', 'mode-map');
+            document.body.classList.remove('mode-grid', 'mode-split', 'mode-map', 'mode-table');
             document.body.classList.add('mode-' + mode);
             document.body.classList.remove('mobile-map-open');
             if (mode === 'map') {
@@ -114,14 +159,15 @@
                 document.body.classList.remove('tablet-pane-map');
             }
 
-            document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
-            if (mode === 'grid') document.getElementById('btnViewGrid')?.classList.add('active');
-            if (mode === 'split') document.getElementById('btnViewSplit')?.classList.add('active');
-            if (mode === 'map') document.getElementById('btnViewMap')?.classList.add('active');
+            syncViewButtons();
 
             syncTabletToggle();
             syncMapFab();
-            ensureMapInitialized();
+            if (mode === 'table') {
+                renderTable(computeFilteredItems());
+            } else if (mode === 'split' || mode === 'map') {
+                ensureMapInitialized();
+            }
 
             setTimeout(() => {
                 if (map) map.invalidateSize();
@@ -132,6 +178,7 @@
             document.body.classList.toggle('tablet-pane-map', pane === 'map');
             document.body.classList.toggle('tablet-pane-list', pane === 'list');
             syncTabletToggle();
+            syncViewButtons();
             if (pane === 'map') ensureMapInitialized();
             setTimeout(() => {
                 if (map) map.invalidateSize();
@@ -141,6 +188,7 @@
         function toggleMobileMap() {
             const open = document.body.classList.toggle('mobile-map-open');
             syncMapFab();
+            syncViewButtons();
             const fab = document.getElementById('mapFab');
             if (fab) {
                 fab.setAttribute('aria-label', open ? 'Pokaż listę ofert' : 'Pokaż pełnoekranową mapę');
@@ -404,6 +452,7 @@
                 ['tabBtnOverview', 'configTabOverview', 'overview'],
                 ['tabBtnProfiles', 'configTabProfiles', 'profiles'],
                 ['tabBtnCapex', 'configTabCapex', 'capex'],
+                ['tabBtnCommute', 'configTabCommute', 'commute'],
                 ['tabBtnScrapers', 'configTabScrapers', 'scrapers'],
                 ['tabBtnScheduler', 'configTabScheduler', 'scheduler'],
                 ['tabBtnAi', 'configTabAi', 'ai'],
@@ -424,6 +473,9 @@
             }
             if (tab === 'overview') {
                 loadOverviewTab();
+            }
+            if (tab === 'commute') {
+                renderCommuteDestinations();
             }
         }
 
@@ -513,6 +565,15 @@
                 }
 
                 renderProfileTabs();
+
+                commuteDestinations = Array.isArray(activeConfig.commute_destinations)
+                    ? activeConfig.commute_destinations.map(d => ({
+                        label: d.label || '',
+                        latitude: Number(d.latitude) || 0,
+                        longitude: Number(d.longitude) || 0,
+                    }))
+                    : [];
+                syncCommuteFilterOptions();
 
                 const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
                 const labelEl = document.getElementById('profileDropLabel');
@@ -850,6 +911,9 @@
             if (document.getElementById('cfgVisionBaseUrl')) {
                 document.getElementById('cfgVisionBaseUrl').value = activeConfig.vision_base_url || '';
             }
+            if (document.getElementById('cfgVisionTimeout')) {
+                document.getElementById('cfgVisionTimeout').value = activeConfig.vision_timeout_seconds || 120;
+            }
 
             const capex = activeConfig.capex || {};
             if (document.getElementById('cfgCapexDeveloper')) {
@@ -864,6 +928,15 @@
             if (document.getElementById('cfgCapexPccExempt')) {
                 document.getElementById('cfgCapexPccExempt').checked = !!capex.pcc_exempt_first_home;
             }
+
+            commuteDestinations = Array.isArray(activeConfig.commute_destinations)
+                ? activeConfig.commute_destinations.map(d => ({
+                    label: d.label || '',
+                    latitude: Number(d.latitude) || 0,
+                    longitude: Number(d.longitude) || 0,
+                }))
+                : [];
+            renderCommuteDestinations();
 
             if (!currentProfileId && allProfiles.length > 0) {
                 currentProfileId = allProfiles[0].id;
@@ -880,6 +953,80 @@
             if (!e || e.target.id === 'configModal' || e === null) {
                 document.getElementById('configModal').classList.remove('open');
                 document.body.classList.remove('config-open');
+            }
+        }
+
+        // ========================
+        // Commute matrix editor
+        // ========================
+        function syncCommuteFilterOptions() {
+            const sel = document.getElementById('filterCommuteDest');
+            if (!sel) return;
+            const current = sel.value;
+            sel.innerHTML = '<option value="ALL">Wszystkie cele</option>' +
+                commuteDestinations
+                    .filter(d => d && d.label)
+                    .map(d => `<option value="${escapeHtml(d.label)}">${escapeHtml(d.label)}</option>`).join('');
+            if (current && commuteDestinations.some(d => d.label === current)) {
+                sel.value = current;
+            } else {
+                sel.value = 'ALL';
+            }
+        }
+
+        function renderCommuteDestinations() {
+            const list = document.getElementById('commuteDestinationsList');
+            if (!list) return;
+            if (!commuteDestinations.length) {
+                list.innerHTML = '<div style="font-size:12px;color:var(--text-faint);padding:8px 0;">Brak zdefiniowanych celów dojazdu. Dodaj pierwszy poniżej.</div>';
+                return;
+            }
+            list.innerHTML = commuteDestinations.map((d, idx) => `
+                <div class="commute-dest-item">
+                    <div class="commute-dest-fields">
+                        <input type="text" class="config-chips-input" value="${escapeHtml(d.label)}" placeholder="Nazwa"
+                               oninput="commuteDestinations[${idx}].label = this.value">
+                        <input type="number" class="config-chips-input" value="${d.latitude}" placeholder="Szerokość geogr. (lat)" step="0.000001"
+                               oninput="commuteDestinations[${idx}].latitude = parseFloat(this.value)">
+                        <input type="number" class="config-chips-input" value="${d.longitude}" placeholder="Długość geogr. (lon)" step="0.000001"
+                               oninput="commuteDestinations[${idx}].longitude = parseFloat(this.value)">
+                    </div>
+                    <button type="button" class="btn btn-sm btn-ghost" onclick="removeCommuteDestination(${idx})" title="Usuń cel dojazdu">✕</button>
+                </div>
+            `).join('');
+        }
+
+        function addCommuteDestination(label, lat, lon) {
+            commuteDestinations.push({ label: label || '', latitude: lat || 0, longitude: lon || 0 });
+            renderCommuteDestinations();
+        }
+
+        function removeCommuteDestination(index) {
+            if (index >= 0 && index < commuteDestinations.length) {
+                commuteDestinations.splice(index, 1);
+                renderCommuteDestinations();
+            }
+        }
+
+        async function geocodeNewDestination() {            const labelInput = document.getElementById('cfgNewDestLabel');
+            const addrInput = document.getElementById('cfgNewDestAddress');
+            const btn = document.getElementById('btnGeocodeDest');
+            if (!addrInput || !addrInput.value.trim()) return;
+
+            const label = (labelInput && labelInput.value.trim()) || addrInput.value.trim();
+            btn.disabled = true;
+            btn.textContent = 'Szukam…';
+            try {
+                const res = await Transport.geocode(addrInput.value.trim());
+                addCommuteDestination(label, res.latitude, res.longitude);
+                if (labelInput) labelInput.value = '';
+                addrInput.value = '';
+                showToast('Znaleziono lokalizację i dodano cel dojazdu.');
+            } catch (err) {
+                showToast('Nie udało się odnaleźć adresu: ' + (err.message || err));
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Szukaj adresu';
             }
         }
 
@@ -1103,6 +1250,10 @@
                 pcc_exempt_first_home: !!document.getElementById('cfgCapexPccExempt')?.checked
             };
 
+            const commuteDestinationsPayload = commuteDestinations
+                .filter(d => d && d.label && Number.isFinite(d.latitude) && Number.isFinite(d.longitude))
+                .map(d => ({ label: d.label, latitude: Number(d.latitude), longitude: Number(d.longitude) }));
+
             const localBaseUrl = document.getElementById('cfgLocalBaseUrl')?.value?.trim() || document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || 'http://localhost:11434';
             const localModel = document.getElementById('cfgLocalModel')?.value?.trim() || document.getElementById('cfgOllamaModel')?.value?.trim() || 'qwen2.5:7b';
             const localTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || 180;
@@ -1117,6 +1268,7 @@
                 scrapers: scrapersPayload,
                 scheduler: schedulerPayload,
                 capex: capexPayload,
+                commute_destinations: commuteDestinationsPayload,
                 llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
                 llm_provider: document.getElementById('cfgLlmProvider')?.value || 'auto',
                 local_llm_preset: localPreset,
@@ -1134,7 +1286,8 @@
                 ollama_num_ctx: localCtx,
                 openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro',
                 vision_model: document.getElementById('cfgVisionModel')?.value?.trim() || '',
-                vision_base_url: document.getElementById('cfgVisionBaseUrl')?.value?.trim() || ''
+                vision_base_url: document.getElementById('cfgVisionBaseUrl')?.value?.trim() || '',
+                vision_timeout_seconds: parseFloat(document.getElementById('cfgVisionTimeout')?.value) || 120
             };
 
             try {
@@ -1353,6 +1506,8 @@
             if (document.getElementById('filterMinRooms')) document.getElementById('filterMinRooms').value = '';
             if (document.getElementById('filterMinYear')) document.getElementById('filterMinYear').value = '';
             if (document.getElementById('filterExactLoc')) document.getElementById('filterExactLoc').value = 'ALL';
+            if (document.getElementById('filterCommuteDest')) document.getElementById('filterCommuteDest').value = 'ALL';
+            if (document.getElementById('filterCommuteMaxMin')) document.getElementById('filterCommuteMaxMin').value = '';
             if (document.getElementById('filterPerspective')) document.getElementById('filterPerspective').value = 'ALL';
             if (document.getElementById('perspectiveSelect')) document.getElementById('perspectiveSelect').value = 'ALL';
             currentPerspective = 'ALL';
@@ -1379,6 +1534,8 @@
             const minRoomsVal = parseInt(document.getElementById('filterMinRooms')?.value) || null;
             const minYearVal = parseInt(document.getElementById('filterMinYear')?.value) || null;
             const exactLocVal = document.getElementById('filterExactLoc')?.value || 'ALL';
+            const commuteDestVal = document.getElementById('filterCommuteDest')?.value || 'ALL';
+            const commuteMaxMinVal = parseFloat(document.getElementById('filterCommuteMaxMin')?.value) || null;
 
             const baseListings = getListingsForActiveProfile();
 
@@ -1397,6 +1554,8 @@
                 if (currentFilter === 'REJECTED' && item.user_status !== 'REJECTED' && !item.qualification_status.startsWith('REJECTED')) return false;
                 if (currentFilter === 'NEW' && !item.is_new_cycle) return false;
 
+                if (currentTagFilter && !(item.user_tags || []).includes(currentTagFilter)) return false;
+
                 if (categoryVal !== 'ALL' && item.category !== categoryVal) return false;
 
                 if (maxPriceVal && item.price > maxPriceVal) return false;
@@ -1414,12 +1573,17 @@
                 if (minYearVal && (item.year_built === null || item.year_built === undefined || item.year_built < minYearVal)) return false;
                 if (exactLocVal === 'EXACT' && !item.is_exact_coords) return false;
 
+                if (commuteDestVal !== 'ALL' && commuteMaxMinVal) {
+                    const entry = (item.commute_custom || {})[commuteDestVal];
+                    if (!entry || Number(entry.min) > commuteMaxMinVal) return false;
+                }
+
                 if (query) {
                     const haystack = [
                         item.title, item.location_raw, item.street, item.district, item.city,
                         item.building_type, item.user_notes, item.sewerage, item.heating,
                         ...(item.pros || []), ...(item.cons || []),
-                        ...(item.filter_reasons || [])
+                        ...(item.filter_reasons || []), ...(item.user_tags || [])
                     ].join(" ").toLowerCase();
                     if (!haystack.includes(query)) return false;
                 }
@@ -1465,22 +1629,29 @@
 
         function debouncedApplyFilters() {
             clearTimeout(searchDebounceTimer);
-            searchDebounceTimer = setTimeout(applyFilters, 250);
+            searchDebounceTimer = setTimeout(() => applyFilters(true), 250);
         }
 
-        function applyFilters() {
+        function applyFilters(forceFitMap = false) {
             const baseListings = getListingsForActiveProfile();
             updateStats(baseListings);
             const filtered = computeFilteredItems();
             updateFilteredCount(filtered.length, filtered);
             renderGrid(filtered);
-            renderMapMarkers(filtered);
+            if (currentViewMode === 'table') {
+                renderTable(filtered);
+            }
+            const searchHasVal = Boolean(document.getElementById('searchInput')?.value.trim());
+            renderMapMarkers(filtered, forceFitMap || searchHasVal);
             renderFilterTokens();
             saveFilterState();
+            if (typeof updateSelectAllCheckboxState === 'function') {
+                updateSelectAllCheckboxState();
+            }
         }
 
         // Persist filter + sort + search state per profile so a reload keeps the session.
-        const FILTER_STATE_IDS = ['filterCategory', 'filterMaxPrice', 'filterMinArea', 'filterMaxArea', 'filterMinPlot', 'filterMarket', 'filterBuildingType', 'filterFinish', 'filterVis', 'filterSewerage', 'filterHeating', 'filterMinRooms', 'filterMinYear', 'filterExactLoc', 'filterPerspective', 'perspectiveSelect', 'searchInput', 'sortSelect'];
+        const FILTER_STATE_IDS = ['filterCategory', 'filterMaxPrice', 'filterMinArea', 'filterMaxArea', 'filterMinPlot', 'filterMarket', 'filterBuildingType', 'filterFinish', 'filterVis', 'filterSewerage', 'filterHeating', 'filterMinRooms', 'filterMinYear', 'filterExactLoc', 'filterCommuteDest', 'filterCommuteMaxMin', 'filterPerspective', 'perspectiveSelect', 'searchInput', 'sortSelect'];
 
         function filterStateKey() {
             return 'hunter_filters_' + (selectedProfileId || 'ALL');
@@ -1577,6 +1748,16 @@
             if (minYear) add('filterMinYear', 'Rok budowy', `≥ ${minYear}`);
             sel('filterExactLoc', 'Lokalizacja');
 
+            const commuteDestTok = document.getElementById('filterCommuteDest');
+            const commuteMaxTok = parseFloat(document.getElementById('filterCommuteMaxMin')?.value);
+            if (commuteDestTok && commuteDestTok.value !== 'ALL' && commuteMaxTok) {
+                add('filterCommuteDest', 'Dojazd', `${commuteDestTok.value} ≤ ${commuteMaxTok} min`);
+            }
+
+            if (currentTagFilter) {
+                t.push({ id: '__tag__', label: 'Etykieta', text: '#' + currentTagFilter });
+            }
+
             const xSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
 
             box.innerHTML = t.map(tk =>
@@ -1587,6 +1768,10 @@
         }
 
         function clearToken(id) {
+            if (id === '__tag__') {
+                clearTagFilter();
+                return;
+            }
             const el = document.getElementById(id);
             if (!el) return;
             if (el.tagName === 'SELECT') {
@@ -1601,6 +1786,10 @@
             if (id === 'filterMaxArea') {
                 const minEl = document.getElementById('filterMinArea');
                 if (minEl) minEl.value = '';
+            }
+            if (id === 'filterCommuteDest') {
+                const maxEl = document.getElementById('filterCommuteMaxMin');
+                if (maxEl) maxEl.value = '';
             }
             applyFilters();
         }
@@ -1733,6 +1922,10 @@
                 ? `Działka: ${plotText}`
                 : (cat === 'mieszkanie' ? `${item.area_home.toFixed(0)} m² • ${item.rooms ? item.rooms + ' pok. • ' : ''}` : `${item.area_home.toFixed(0)} m² • Działka: ${plotText} • `);
 
+            const visionPopupBadge = item.vision_discrepancy_note
+                ? `<div class="popup-precision" style="color:var(--yellow,#f59e0b);font-weight:600;margin-top:2px;">⚠️ Rozbieżność foto z opisem</div>`
+                : (item.vision_is_render === true ? `<div class="popup-precision" style="color:var(--accent,#3b82f6);margin-top:2px;">Wizualizacje 3D (Vision AI)</div>` : '');
+
             const popupHtml = `
                 <div class="popup-card">
                     <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.onerror=null;this.src='${LOCAL_PLACEHOLDER}'" onclick="openImgModal('${escapeHtml(fullImg)}')">
@@ -1741,6 +1934,7 @@
                         <div class="popup-title"><a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.title)}</a></div>
                         <div class="popup-specs">${escapeHtml(specsText)}${escapeHtml(item.street || item.district || item.city || '')}</div>
                         <div class="popup-precision" style="color: ${precisionColor};">${precisionText}</div>
+                        ${visionPopupBadge}
                         <div class="popup-actions">
                             <button class="btn btn-sm ${item.user_status === 'FAVORITE' ? 'active-fav' : ''}" onclick="updateStatus(${item.id}, 'FAVORITE')">★</button>
                             <button class="btn btn-sm ${item.user_status === 'TO_VISIT' ? 'active-visit' : ''}" onclick="updateStatus(${item.id}, 'TO_VISIT')">Do wizyty</button>
@@ -1771,7 +1965,7 @@
             return marker;
         }
 
-        function renderMapMarkers(items) {
+        function renderMapMarkers(items, forceFit = false) {
             if (!map || !markersGroup) return;
 
             markersGroup.clearLayers();
@@ -1794,10 +1988,9 @@
                 renderAqiMapLayer(items);
             }
 
-            // Preserve the user's pan/zoom across filter changes; re-fit only on
-            // first render, profile switch, or explicit "Dopasuj" click.
             const profileKey = selectedProfileId || 'ALL';
-            if (mapFittedProfileKey !== profileKey) {
+            const shouldFit = forceFit || (mapFittedProfileKey !== profileKey) || (validCoordsItems.length > 0 && validCoordsItems.length <= 5);
+            if (shouldFit) {
                 mapFittedProfileKey = profileKey;
                 if (validCoordsItems.length === 1) {
                     try {
@@ -1807,7 +2000,7 @@
                             15
                         );
                     } catch (e) {}
-                } else {
+                } else if (validCoordsItems.length > 1) {
                     fitMapToMarkers();
                 }
             }
@@ -1819,6 +2012,10 @@
             const btn = document.getElementById('btnToggleAqiLayer');
             if (btn) {
                 btn.classList.toggle('active', aqiLayerActive);
+            }
+            const legend = document.getElementById('mapAqiLegend');
+            if (legend) {
+                legend.style.display = aqiLayerActive ? 'block' : 'none';
             }
             renderAqiMapLayer(allListings);
         }
@@ -2200,7 +2397,8 @@
                 'more': `<svg ${s}><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg>`,
                 'plug': `<svg ${s}><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>`,
                 'copy': `<svg ${s}><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>`,
-                'alert-triangle': `<svg ${s}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`
+                'alert-triangle': `<svg ${s}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg>`,
+                'tag': `<svg ${s}><path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path><circle cx="7.5" cy="7.5" r=".5" fill="currentColor"></circle></svg>`
             };
             return icons[name] || '';
         }
@@ -2261,7 +2459,11 @@
             const imgFetchPriority = isFirstCard ? ' fetchpriority="high"' : '';
 
             const prosHtml = (item.pros || []).slice(0, 2).map(p => `<li>${escapeHtml(p)}</li>`).join('');
-            const consHtml = (item.cons || []).slice(0, 1).map(c => `<li class="warning">${escapeHtml(c)}</li>`).join('');
+            const rawCons = [...(item.cons || [])];
+            if (item.vision_discrepancy_note && !rawCons.some(c => typeof c === 'string' && (c.includes('Rozbieżność') || c.includes(item.vision_discrepancy_note)))) {
+                rawCons.unshift(`Rozbieżność foto: ${item.vision_discrepancy_note}`);
+            }
+            const consHtml = rawCons.slice(0, 1).map(c => `<li class="warning">${escapeHtml(typeof c === 'string' ? c : JSON.stringify(c))}</li>`).join('');
 
             const precisionTag = item.is_exact_coords
                 ? `<span class="loc-precision tag-exact">Dokładna</span>`
@@ -2288,11 +2490,22 @@
                 aqiTag = `<span class="meta-tag tag-aqi ${aqiCls}" title="Jakość powietrza CAMS: AQI ${aqiVal} - ${escapeHtml(label)}${winterNote}">AQI ${aqiVal}</span>`;
             }
 
+            let aiBadge = '';
+            if (item.worth_interest === true) {
+                aiBadge = `<span class="meta-tag tag-exact" title="AI Rekomendacja: Pozytywna (Kwalifikuje się) — ${escapeHtml(item.ai_verdict || '')}">🤖 AI: Warto</span>`;
+            } else if (item.worth_interest === false) {
+                aiBadge = `<span class="meta-tag tag-aqi tag-aqi-danger" title="AI Rekomendacja: Negatywna (Do odrzucenia) — ${escapeHtml(item.ai_verdict || '')}">🤖 AI: Odrzuć</span>`;
+            } else if (item.ai_summary) {
+                aiBadge = `<span class="meta-tag tag-profile" title="Wygenerowano raport AI">🤖 AI Raport</span>`;
+            }
+
             let rejectionHtml = "";
             if (item.filter_reasons && item.filter_reasons.length > 0 && !item.is_qualified) {
+                const firstReason = escapeHtml(item.filter_reasons[0]);
+                const countBadge = item.filter_reasons.length > 1 ? ` (+${item.filter_reasons.length - 1})` : '';
                 rejectionHtml = `
                     <details class="rejection-box">
-                        <summary><span class="rejection-label">Kryterium wykluczające (${item.filter_reasons.length})</span></summary>
+                        <summary><span class="rejection-label" title="${firstReason}">⚠️ ${firstReason}${countBadge}</span></summary>
                         <ul>${item.filter_reasons.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
                     </details>
                 `;
@@ -2303,7 +2516,8 @@
             const sewText = item.sewerage && item.sewerage !== 'nieznana' ? escapeHtml(item.sewerage) : '';
             const heatText = item.heating && item.heating !== 'nieznane' ? escapeHtml(item.heating) : '';
             const roadText = item.access_road_type && item.access_road_type !== 'nieznana' ? escapeHtml(item.access_road_type) : '';
-            const visTag = item.has_visualisations ? `<span class="meta-tag tag-vis">Wizualizacje</span>` : '';
+            const visTag = (item.has_visualisations || item.vision_is_render === true) ? `<span class="meta-tag tag-vis" title="Zdjęcia to wizualizacje 3D / rendery">Wizualizacje 3D</span>` : '';
+            const visionDiscrepancyTag = item.vision_discrepancy_note ? `<span class="meta-tag tag-aqi tag-aqi-danger" title="${escapeHtml(item.vision_discrepancy_note)}">⚠️ Rozbieżność foto</span>` : '';
             const mpzpZoneText = item.mpzp_zone ? escapeHtml(item.mpzp_zone.length > 25 ? item.mpzp_zone.slice(0, 25) + '…' : item.mpzp_zone) : '';
             const floodWarn = item.flood_risk_zone === 'ZAGROZENIE_POWODZIOWE';
 
@@ -2448,6 +2662,15 @@
 
             const gesutUrl = item.gesut_url || geoportalHref;
 
+            const userTags = item.user_tags || [];
+            const tagChips = userTags.length
+                ? userTags.map((t, idx) => `<span class="menu-tag-chip">#${escapeHtml(t)}<button type="button" onclick="removeTagFromItem(${item.id}, ${idx})" title="Usuń etykietę">×</button></span>`).join('')
+                : '<span class="menu-tag-empty">Brak etykiet</span>';
+
+            const tagsHtml = userTags.length
+                ? `<div class="card-tags">${userTags.map(t => `<span class="card-tag ${currentTagFilter === t ? 'is-active' : ''}" data-tag="${escapeHtml(t)}" onclick="filterByTag(this.dataset.tag)" title="Filtruj po etykiecie">#${escapeHtml(t)}</span>`).join('')}</div>`
+                : '';
+
             const crmMenu = `
                 <div class="card-action-menu">
                     <button class="card-action" onclick="toggleCardMenu(event, ${item.id})" title="Akcje CRM">
@@ -2460,18 +2683,32 @@
                         <button class="menu-item" onclick="toggleNotes(${item.id})">${svgIcon('note')} Notatka${notesBadge}</button>
                         ${gesutUrl ? `<a class="menu-item" href="${escapeHtml(gesutUrl)}" target="_blank" rel="noopener noreferrer" title="Uzbrojenie terenu GESUT (woda, prąd, gaz, kanalizacja)">${svgIcon('plug')} Uzbrojenie GESUT</a>` : ''}
                         <button class="menu-item" onclick="locateOnMap(${item.id}, ${item.latitude || 'null'}, ${item.longitude || 'null'})">${svgIcon('map-pin')} Pokaż na mapie</button>
+                        <div class="menu-tag-editor">
+                            <div class="menu-tag-title">${svgIcon('tag')} Etykiety własne</div>
+                            <div class="menu-tag-chips">${tagChips}</div>
+                            <div class="menu-tag-input-row">
+                                <input type="text" id="tag-input-${item.id}" class="menu-tag-input" placeholder="np. negocjacja, zadzwonić…" onkeydown="if(event.key==='Enter'){event.preventDefault();addTagFromInput(${item.id});}">
+                                <button type="button" class="menu-tag-add" onclick="addTagFromInput(${item.id})" title="Dodaj etykietę">+</button>
+                            </div>
+                        </div>
                         <button class="menu-item danger ${item.user_status === 'REJECTED' ? 'active' : ''}" onclick="toggleStatus(${item.id}, 'REJECTED')">${svgIcon('x')} ${item.user_status === 'REJECTED' ? 'Przywróć' : 'Odrzuć'}</button>
                     </div>
                 </div>
             `;
 
+            const isSelected = selectedListingIds.has(item.id);
+            const selectedClass = isSelected ? ' is-selected' : '';
+
             return `
-            <article class="card ${cardCrmClass}" id="card-${item.id}" onmouseenter="highlightMapMarker(${item.id}, true)" onmouseleave="highlightMapMarker(${item.id}, false)">
+            <article class="card ${cardCrmClass}${selectedClass}" id="card-${item.id}" onmouseenter="highlightMapMarker(${item.id}, true)" onmouseleave="highlightMapMarker(${item.id}, false)">
                 <div class="card-media" onclick="openListingGallery(${item.id}, 0)">
                     <img id="card-img-${item.id}" src="${escapeHtml(imgSrc)}" alt="Zdjęcie nieruchomości" loading="${imgLoading}" decoding="async"${imgFetchPriority} onerror="this.onerror=null;this.src='${LOCAL_PLACEHOLDER}'">
                     ${galleryCountBadge}
                     <div class="card-media-topbar">
                         <div class="card-badges-group">
+                            <label class="card-select-label" onclick="event.stopPropagation()" title="Zaznacz ofertę do akcji grupowych lub porównania">
+                                <input type="checkbox" class="card-checkbox" data-id="${item.id}" onchange="toggleItemSelection(${item.id}, this.checked)" ${isSelected ? 'checked' : ''}>
+                            </label>
                             ${deltaBadge}
                         </div>
                         <button type="button" class="card-fav-btn ${item.user_status === 'FAVORITE' ? 'active' : ''}" onclick="event.stopPropagation(); toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">
@@ -2484,9 +2721,11 @@
                     <div class="card-meta-row">
                         <span class="meta-source"><b>${catLabel}</b> · ${escapeHtml(item.portal).toUpperCase()} · #${escapeHtml(item.portal_id)}</span>
                         <span class="workflow-badge ${badgeClass}">${badgeLabel}</span>
+                        ${aiBadge}
                         ${profileBadge}
                         ${ownerBadge}
                         ${visTag}
+                        ${visionDiscrepancyTag}
                         ${deltaPill}
                         ${aqiTag}
                         <span class="meta-score">Score <strong>${Math.round(item.qualification_score)}</strong>/150</span>
@@ -2519,6 +2758,8 @@
                     ${rejectionHtml}
 
                     ${(prosHtml || consHtml) ? `<div class="card-features"><ul>${prosHtml}${consHtml}</ul></div>` : ''}
+
+                    ${tagsHtml}
 
                     <div class="card-footer">
                         <button class="card-action primary" onclick="openAiModal(${item.id})" title="Raport audytu i due diligence">
@@ -2635,6 +2876,58 @@
                 stLabel.innerText = "Błąd zapisu";
                 showToast("Nie udało się zapisać notatki.");
             }
+        }
+
+        // ========================
+        // Custom labels / tags
+        // ========================
+        async function persistTags(id) {
+            const item = allListings.find(i => i.id === id);
+            if (!item) return;
+            try {
+                await Transport.updateTags(id, item.user_tags || []);
+                renderGrid(computeFilteredItems());
+                if (currentViewMode === 'table') renderTable(computeFilteredItems());
+            } catch (err) {
+                console.error("Tag update failed:", err);
+                showToast("Błąd zapisu etykiet.");
+            }
+        }
+
+        async function addTagFromInput(id) {
+            const input = document.getElementById('tag-input-' + id);
+            if (!input) return;
+            const raw = input.value.trim();
+            if (!raw) return;
+            const item = allListings.find(i => i.id === id);
+            if (!item) return;
+            if (!item.user_tags) item.user_tags = [];
+            if (!item.user_tags.includes(raw)) {
+                item.user_tags.push(raw);
+                await persistTags(id);
+            }
+            input.value = "";
+        }
+
+        async function removeTagFromItem(id, index) {
+            const item = allListings.find(i => i.id === id);
+            if (!item || !item.user_tags) return;
+            if (index >= 0 && index < item.user_tags.length) {
+                item.user_tags.splice(index, 1);
+                await persistTags(id);
+            }
+        }
+
+        function filterByTag(tag) {
+            currentTagFilter = (currentTagFilter === tag) ? null : tag;
+            renderFilterTokens();
+            applyFilters();
+        }
+
+        function clearTagFilter() {
+            currentTagFilter = null;
+            renderFilterTokens();
+            applyFilters();
         }
 
         // ========================
@@ -3224,6 +3517,7 @@
             const requestedProvider = document.getElementById('cfgLlmProvider')?.value || null;
             const requestedVisionModel = document.getElementById('cfgVisionModel')?.value?.trim() ?? null;
             const requestedVisionBaseUrl = document.getElementById('cfgVisionBaseUrl')?.value?.trim() ?? null;
+            const requestedVisionTimeout = parseFloat(document.getElementById('cfgVisionTimeout')?.value) || null;
 
             if (btn) btn.disabled = true;
             if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
@@ -3249,7 +3543,8 @@
                     openrouter_model: requestedOpenRouter,
                     llm_provider: requestedProvider,
                     vision_model: requestedVisionModel,
-                    vision_base_url: requestedVisionBaseUrl
+                    vision_base_url: requestedVisionBaseUrl,
+                    vision_timeout_seconds: requestedVisionTimeout
                 });
                 lastLlmStatusData = data;
                 renderLlmStatus(data);
@@ -3483,7 +3778,7 @@
                                 ${vBadge}
                             </div>
                             <div class="llm-provider-msg">
-                                Serwer: <code>${escapeHtml(vt.base_url || 'auto')}</code> · ${vHasWarn ? `<span style="color:var(--yellow,#f59e0b);">${escapeHtml(vt.warning)}</span>` : (vt.ready ? (vt.is_local ? 'Lokalny silnik wizyjny gotowy' : 'Połączenie z modelem aktywne') : 'Wymaga klucza API w .env lub uruchomionej lokalnej Ollamy')}
+                                Serwer: <code>${escapeHtml(vt.base_url || 'auto')}</code> · Timeout: <code>${vt.timeout || 120}s</code> · ${vHasWarn ? `<span style="color:var(--yellow,#f59e0b);">${escapeHtml(vt.warning)}</span>` : (vt.ready ? (vt.is_local ? 'Lokalny silnik wizyjny gotowy' : 'Połączenie z modelem aktywne') : 'Wymaga klucza API w .env lub uruchomionej lokalnej Ollamy')}
                             </div>
                         </div>
                     </div>
@@ -3558,6 +3853,341 @@
             }
         });
 
+        // ============================================================================
+        // Table View, Bulk Actions, CSV Export, and Side-by-Side Comparison
+        // ============================================================================
+
+        const selectedListingIds = new Set();
+
+        function toggleItemSelection(id, checked) {
+            if (checked) {
+                selectedListingIds.add(id);
+            } else {
+                selectedListingIds.delete(id);
+            }
+
+            const cardBox = document.querySelector(`.card-checkbox[data-id="${id}"]`);
+            if (cardBox) cardBox.checked = checked;
+            const cardEl = document.getElementById(`card-${id}`);
+            if (cardEl) cardEl.classList.toggle('is-selected', checked);
+
+            const tableBox = document.querySelector(`.table-checkbox[data-id="${id}"]`);
+            if (tableBox) tableBox.checked = checked;
+            const tableRow = document.getElementById(`table-row-${id}`);
+            if (tableRow) tableRow.classList.toggle('is-selected', checked);
+
+            updateBulkActionBar();
+            updateSelectAllCheckboxState();
+        }
+
+        function toggleSelectAllVisible(checked) {
+            const visible = computeFilteredItems();
+            visible.forEach(item => {
+                if (checked) {
+                    selectedListingIds.add(item.id);
+                } else {
+                    selectedListingIds.delete(item.id);
+                }
+            });
+
+            document.querySelectorAll('.card-checkbox').forEach(cb => {
+                const id = parseInt(cb.dataset.id, 10);
+                cb.checked = selectedListingIds.has(id);
+                const cardEl = document.getElementById(`card-${id}`);
+                if (cardEl) cardEl.classList.toggle('is-selected', selectedListingIds.has(id));
+            });
+
+            document.querySelectorAll('.table-checkbox').forEach(cb => {
+                const id = parseInt(cb.dataset.id, 10);
+                cb.checked = selectedListingIds.has(id);
+                const rowEl = document.getElementById(`table-row-${id}`);
+                if (rowEl) rowEl.classList.toggle('is-selected', selectedListingIds.has(id));
+            });
+
+            updateBulkActionBar();
+            updateSelectAllCheckboxState();
+        }
+
+        function updateSelectAllCheckboxState() {
+            const selectAllTable = document.getElementById('selectAllTableCheckbox');
+            const visible = computeFilteredItems();
+            if (!selectAllTable || visible.length === 0) return;
+            const visibleSelected = visible.filter(i => selectedListingIds.has(i.id));
+            selectAllTable.checked = visibleSelected.length === visible.length;
+            selectAllTable.indeterminate = visibleSelected.length > 0 && visibleSelected.length < visible.length;
+        }
+
+        function clearSelectedListings() {
+            selectedListingIds.clear();
+            document.querySelectorAll('.card-checkbox, .table-checkbox').forEach(cb => { cb.checked = false; });
+            document.querySelectorAll('article.card.is-selected, tr.is-selected').forEach(el => el.classList.remove('is-selected'));
+            updateBulkActionBar();
+            updateSelectAllCheckboxState();
+        }
+
+        function updateBulkActionBar() {
+            const bar = document.getElementById('bulkActionBar');
+            const countEl = document.getElementById('bulkSelectedCount');
+            if (!bar || !countEl) return;
+            const count = selectedListingIds.size;
+            countEl.textContent = count;
+            bar.style.display = count > 0 ? 'flex' : 'none';
+        }
+
+        async function bulkSetStatus(status) {
+            if (selectedListingIds.size === 0) return;
+            const ids = Array.from(selectedListingIds);
+            for (const id of ids) {
+                await toggleStatus(id, status);
+            }
+            clearSelectedListings();
+            showToast(`Zaktualizowano status ${ids.length} ofert na: ${status}`);
+        }
+
+        function renderTable(items) {
+            const tbody = document.getElementById('listingsTableBody');
+            if (!tbody) return;
+            if (!items || items.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted);">Brak ofert spełniających aktywne kryteria wyszukiwania.</td></tr>';
+                return;
+            }
+
+            const rows = items.map(item => {
+                const isSelected = selectedListingIds.has(item.id);
+                const imgSrc = thumbUrl(item.main_image_url) || LOCAL_PLACEHOLDER;
+                const cat = item.category || 'dom';
+                const catLabel = cat === 'mieszkanie' ? 'Mieszkanie' : (cat === 'dzialka' ? 'Działka' : 'Dom');
+                const priceFmt = item.price ? formatPrice(item.price) : '—';
+                const priceM2Fmt = item.price_per_m2 ? `${Math.round(item.price_per_m2).toLocaleString('pl-PL')} zł/m²` : '—';
+                const areaFmt = item.area_home > 0 ? `${item.area_home.toFixed(1)} m²` : (item.area_plot ? `${Math.round(item.area_plot)} m²` : '—');
+                const plotFmt = item.area_plot ? `${Math.round(item.area_plot)} m²` : '—';
+                const finishFmt = item.finish_condition && item.finish_condition !== 'nieokreślony' ? escapeHtml(item.finish_condition) : '—';
+                const scoreFmt = item.match_score !== null && item.match_score !== undefined ? `${Math.round(item.match_score)}` : '—';
+                const dateFmt = item.created_at ? item.created_at.slice(0, 10) : '—';
+                const portalHref = item.url || '#';
+
+                let badgeClass = "badge-rejected";
+                let badgeLabel = "Odrzucona";
+                if (item.qualification_status === 'QUALIFIED_WHITELIST') {
+                    badgeClass = "badge-whitelist";
+                    badgeLabel = "Whitelist";
+                } else if (item.is_qualified) {
+                    badgeClass = "badge-qualified";
+                    badgeLabel = "Kwalifikacja";
+                } else if (item.qualification_status === 'NEEDS_REVIEW') {
+                    badgeClass = "badge-review";
+                    badgeLabel = "Weryfikacja";
+                }
+
+                return `
+                    <tr id="table-row-${item.id}" class="${isSelected ? 'is-selected' : ''}">
+                        <td style="text-align:center;">
+                            <input type="checkbox" class="table-checkbox" data-id="${item.id}" onchange="toggleItemSelection(${item.id}, this.checked)" ${isSelected ? 'checked' : ''}>
+                        </td>
+                        <td>
+                            <img src="${escapeHtml(imgSrc)}" class="table-thumb" alt="Foto" onclick="openListingGallery(${item.id}, 0)" onerror="this.onerror=null;this.src='${LOCAL_PLACEHOLDER}'">
+                        </td>
+                        <td class="table-title-cell">
+                            <a href="${escapeHtml(portalHref)}" target="_blank" rel="noopener noreferrer" class="table-title-link" title="${escapeHtml(item.title || '')}">${escapeHtml(item.title || 'Oferta #' + item.id)}</a>
+                            <div class="table-loc">
+                                <span>${catLabel}</span> · <span>${escapeHtml(item.location || item.city || '')}</span>
+                            </div>
+                        </td>
+                        <td class="table-price num">${priceFmt}</td>
+                        <td class="num">${priceM2Fmt}</td>
+                        <td class="num">${areaFmt}</td>
+                        <td class="num">${plotFmt}</td>
+                        <td>${finishFmt}</td>
+                        <td><span class="workflow-badge ${badgeClass}" style="font-size:10px;">${badgeLabel}</span> <span class="num">${scoreFmt}</span></td>
+                        <td class="num">${dateFmt}</td>
+                        <td class="table-actions-cell">
+                            <button type="button" class="btn btn-xs" onclick="openAiModal(${item.id})" title="Otwórz audyt Due Diligence">🤖 Raport</button>
+                            <button type="button" class="btn btn-xs ${item.user_status === 'FAVORITE' ? 'btn-primary' : ''}" onclick="toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">★</button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            tbody.innerHTML = rows;
+        }
+
+        function sortTableBy(key) {
+            const sortSelect = document.getElementById('sortSelect');
+            if (!sortSelect) return;
+            const current = sortSelect.value;
+            if (key === 'price') {
+                sortSelect.value = current === 'price_asc' ? 'price_desc' : 'price_asc';
+            } else if (key === 'price_m2') {
+                sortSelect.value = current === 'price_m2_asc' ? 'price_desc' : 'price_m2_asc';
+            } else if (key === 'area') {
+                sortSelect.value = 'area_desc';
+            } else if (key === 'created') {
+                sortSelect.value = 'created_desc';
+            } else if (key === 'score') {
+                sortSelect.value = 'score_desc';
+            } else if (key === 'title') {
+                sortSelect.value = 'score_desc';
+            }
+            applyFilters();
+        }
+
+        function exportListingsToCsv(items, filename = 'oferty_nieruchomosci.csv') {
+            if (!items || items.length === 0) {
+                alert('Brak ofert do eksportu.');
+                return;
+            }
+            const headers = [
+                'ID', 'Portal', 'Portal ID', 'Tytuł', 'Cena [PLN]', 'Cena za m2',
+                'Powierzchnia [m2]', 'Działka [m2]', 'Liczba pokoi', 'Rok budowy',
+                'Stan wykończenia', 'Miejscowość / Adres', 'Szerokość geo', 'Długość geo',
+                'Score', 'Status kwalifikacji', 'Powody odrzucenia', 'AQI', 'Link'
+            ];
+
+            const csvEscape = (val) => {
+                if (val === null || val === undefined) return '""';
+                const str = String(val).replace(/"/g, '""');
+                return `"${str}"`;
+            };
+
+            const rows = items.map(i => [
+                i.id,
+                csvEscape(i.portal),
+                csvEscape(i.portal_id),
+                csvEscape(i.title),
+                i.price || '',
+                i.price_per_m2 ? Math.round(i.price_per_m2) : '',
+                i.area_home || '',
+                i.area_plot || '',
+                i.rooms || '',
+                i.year_built || '',
+                csvEscape(i.finish_condition),
+                csvEscape(i.location || i.city),
+                i.latitude || '',
+                i.longitude || '',
+                i.match_score !== null && i.match_score !== undefined ? Math.round(i.match_score) : '',
+                csvEscape(i.qualification_status),
+                csvEscape((i.filter_reasons || []).join('; ')),
+                i.air_aqi !== null && i.air_aqi !== undefined ? i.air_aqi : '',
+                csvEscape(i.url)
+            ].join(','));
+
+            const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function exportCurrentListingsToCsv() {
+            const items = computeFilteredItems();
+            const dateStr = new Date().toISOString().slice(0, 10);
+            exportListingsToCsv(items, `oferty_widok_${dateStr}.csv`);
+        }
+
+        function exportSelectedListingsToCsv() {
+            const items = allListings.filter(i => selectedListingIds.has(i.id));
+            const dateStr = new Date().toISOString().slice(0, 10);
+            exportListingsToCsv(items, `oferty_wybrane_${dateStr}.csv`);
+        }
+
+        function openCompareModal() {
+            const items = allListings.filter(i => selectedListingIds.has(i.id));
+            if (items.length < 2) {
+                alert('Wybierz co najmniej 2 oferty (zaznaczając pola wyboru na kartach lub w tabeli), aby dokonać porównania.');
+                return;
+            }
+            if (items.length > 5) {
+                alert('Zalecane porównanie to 2–4 oferty. Ograniczono widok do pierwszych 4 wybranych.');
+            }
+            const targetItems = items.slice(0, 4);
+            const modal = document.getElementById('compareModal');
+            const wrapper = document.getElementById('compareTableWrapper');
+            const subtitle = document.getElementById('compareSubtitle');
+            if (!modal || !wrapper) return;
+
+            subtitle.textContent = `Zestawienie parametrów dla ${targetItems.length} wybranych nieruchomości`;
+
+            const minPrice = Math.min(...targetItems.map(i => i.price || Infinity));
+            const maxScore = Math.max(...targetItems.map(i => i.match_score || 0));
+
+            const params = [
+                { label: 'Cena ofertowa', render: i => `<strong class="num ${i.price === minPrice ? 'compare-highlight-best' : ''}">${i.price ? formatPrice(i.price) : '—'}</strong>` },
+                { label: 'Cena / m²', render: i => i.price_per_m2 ? `<span class="num">${Math.round(i.price_per_m2).toLocaleString('pl-PL')} zł/m²</span>` : '—' },
+                { label: 'Szacowany CAPEX', render: i => i.capex_total ? `<span class="num">${formatPrice(i.capex_total)}</span>` : '—' },
+                { label: 'Powierzchnia', render: i => i.area_home > 0 ? `<span class="num">${i.area_home.toFixed(1)} m²</span>` : '—' },
+                { label: 'Działka', render: i => i.area_plot ? `<span class="num">${Math.round(i.area_plot)} m²</span>` : '—' },
+                { label: 'Stan wykończenia', render: i => escapeHtml(i.finish_condition || '—') },
+                { label: 'Rok budowy / Pokoje', render: i => `${i.year_built || '—'} · ${i.rooms ? i.rooms + ' pok.' : '—'}` },
+                { label: 'Ogrzewanie & Ścieki', render: i => `${escapeHtml(i.heating || '—')} / ${escapeHtml(i.sewerage || '—')}` },
+                { label: 'Internet / Światłowód', render: i => i.has_fiber ? '✓ Światłowód' : (escapeHtml(i.broadband_status || '—')) },
+                { label: 'Jakość powietrza (AQI)', render: i => i.air_aqi !== null && i.air_aqi !== undefined ? `AQI ${i.air_aqi} (${escapeHtml(i.air_aqi_label || '')})` : '—' },
+                { label: 'Kwalifikacja & Score', render: i => `<span class="num ${i.match_score === maxScore ? 'compare-highlight-best' : ''}">Score: ${i.match_score !== null && i.match_score !== undefined ? Math.round(i.match_score) : '—'}</span>` },
+                { label: 'Kluczowe zalety', render: i => (i.pros || []).length > 0 ? `<ul>${i.pros.slice(0, 3).map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>` : '—' },
+                { label: 'Uwagi / Ryzyka', render: i => (i.cons || []).length > 0 ? `<ul style="color:var(--red-text);">${i.cons.slice(0, 3).map(c => `<li>${escapeHtml(typeof c === 'string' ? c : JSON.stringify(c))}</li>`).join('')}</ul>` : '—' },
+                {
+                    label: 'Szczegóły & Raport',
+                    render: i => `
+                        <div style="display:flex;gap:6px;flex-direction:column;margin-top:6px;">
+                            <button type="button" class="btn btn-sm btn-primary" onclick="closeCompareModal(); openAiModal(${i.id});">🤖 Otwórz audyt</button>
+                            <a href="${escapeHtml(i.url || '#')}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline">Otwórz ogłoszenie ↗</a>
+                        </div>
+                    `
+                }
+            ];
+
+            let html = '<table class="compare-table"><thead><tr><th class="compare-param-col">Nieruchomość</th>';
+            targetItems.forEach(item => {
+                const imgSrc = thumbUrl(item.main_image_url) || LOCAL_PLACEHOLDER;
+                html += `
+                    <th class="compare-item-col">
+                        <div class="compare-card-top">
+                            <button type="button" class="compare-card-remove" onclick="removeFromCompare(${item.id})" title="Usuń z porównania">&times;</button>
+                            <img src="${escapeHtml(imgSrc)}" class="compare-card-img" alt="Foto">
+                            <div class="compare-card-title">${escapeHtml(item.title || 'Oferta #' + item.id)}</div>
+                            <div style="font-size:11px;color:var(--text-muted);">${escapeHtml(item.location || item.city || '')}</div>
+                        </div>
+                    </th>
+                `;
+            });
+            html += '</tr></thead><tbody>';
+
+            params.forEach(param => {
+                html += `<tr><td class="compare-param-col">${param.label}</td>`;
+                targetItems.forEach(item => {
+                    html += `<td class="compare-item-col">${param.render(item)}</td>`;
+                });
+                html += '</tr>';
+            });
+
+            html += '</tbody></table>';
+            wrapper.innerHTML = html;
+            modal.style.display = 'flex';
+        }
+
+        function closeCompareModal() {
+            const modal = document.getElementById('compareModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        function removeFromCompare(id) {
+            selectedListingIds.delete(id);
+            toggleItemSelection(id, false);
+            if (selectedListingIds.size >= 2) {
+                openCompareModal();
+            } else {
+                closeCompareModal();
+            }
+        }
+
+        function exportCompareToCsv() {
+            const items = allListings.filter(i => selectedListingIds.has(i.id));
+            const dateStr = new Date().toISOString().slice(0, 10);
+            exportListingsToCsv(items, `porownanie_ofert_${dateStr}.csv`);
+        }
+
         async function refreshUpdateDot() {
             const dot = document.getElementById('updateDot');
             if (!dot) return;
@@ -3579,6 +4209,7 @@
             await fetchListings();
             checkActiveScrape();
             ensureMapInitialized();
+            syncViewButtons();
         });
 
         setInterval(() => {

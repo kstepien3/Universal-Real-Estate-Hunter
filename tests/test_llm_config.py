@@ -21,7 +21,35 @@ def test_suggested_models_schema() -> None:
         assert "badge" in m
 
 
-def test_config_manager_ollama_parameters_roundtrip() -> None:
+def test_config_manager_commute_destinations_roundtrip() -> None:
+    from src.services.config_manager import CommuteDestination
+
+    cfg = SearchConfig(
+        commute_destinations=[
+            CommuteDestination(label="Praca", latitude=50.02, longitude=22.00),
+            CommuteDestination(label="Szkoła", latitude=50.03, longitude=22.01),
+        ]
+    )
+    dumped = cfg.model_dump()
+    assert dumped["commute_destinations"][0]["label"] == "Praca"
+
+    updated = config_manager.update_config(
+        {
+            "commute_destinations": [
+                {"label": "Praca", "latitude": 50.02, "longitude": 22.00},
+                {"label": "", "latitude": 50.03, "longitude": 22.01},  # empty label -> dropped
+                {"label": "Złe", "latitude": "abc", "longitude": 22.01},  # invalid -> dropped
+            ]
+        }
+    )
+    assert len(updated.commute_destinations) == 1
+    assert updated.commute_destinations[0].label == "Praca"
+    assert updated.commute_destinations[0].latitude == 50.02
+
+    # Reset
+    config_manager.update_config({"commute_destinations": []})
+    assert config_manager.get_config().commute_destinations == []
+
     cfg = SearchConfig(ollama_temperature=0.2, ollama_num_ctx=4096)
     dumped = cfg.model_dump()
     assert dumped["ollama_temperature"] == 0.2

@@ -31,11 +31,41 @@ def test_extract_tax_ids():
     assert ids["regon"] == "123456789"
 
 
+def test_extract_tax_ids_polish_format_and_pl_prefix():
+    # Standard Polish 3-2-2-3 NIP format
+    text1 = "Dane inwestora: NIP 525-22-48-481, kontakt@invest.pl"
+    ids1 = extract_tax_ids(text1)
+    assert ids1["nip"] == "5252248481"
+
+    # PL-prefixed 10-digit NIP
+    text2 = "Faktura: PL5252248481, biuro sprzedaży"
+    ids2 = extract_tax_ids(text2)
+    assert ids2["nip"] == "5252248481"
+
+
 def test_extract_tax_ids_short_krs():
     text = "Kontakt do biura dewelopera: KRS: 45678, NIP 774-000-14-54"
     ids = extract_tax_ids(text)
     assert ids["nip"] == "7740001454"
     assert ids["krs"] == "0000045678"
+
+
+def test_extract_company_name():
+    from src.services.developer_verifier import extract_company_name
+
+    text1 = "Inwestycję realizuje Nowoczesne Osiedle Sp. z o.o. w Krakowie."
+    assert extract_company_name(text1) == "Nowoczesne Osiedle Sp. z o.o."
+
+    text2 = "Biuro sprzedaży: Dom Dla Każdego\nZadzwoń do nas!"
+    assert extract_company_name(text2) == "Dom Dla Każdego"
+
+
+@pytest.mark.asyncio
+async def test_audit_developer_private_seller():
+    svc = DeveloperVerifierService()
+    res = await svc.audit_developer(description="Sprzedam bezpośrednio dom.", is_private_owner=True)
+    assert res["developer_risk_level"] == "PRIVATE"
+    assert any("prywatne" in r for r in res["developer_risk_reasons"])
 
 
 def test_evaluate_risk_high_liquidation():

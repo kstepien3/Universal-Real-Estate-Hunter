@@ -29,6 +29,23 @@ def _should_notify(*, is_qualified: bool, is_new: bool, price_changed: bool) -> 
     return is_qualified and (is_new or price_changed)
 
 
+def _get_configured_commute_destinations() -> list[dict[str, Any]]:
+    """Returns user-configured commute anchors as plain dicts, or an empty list."""
+    try:
+        from src.services.config_manager import config_manager
+
+        cfg = config_manager.get_config()
+        destinations = getattr(cfg, "commute_destinations", None) or []
+        return [
+            {"label": d.label, "latitude": d.latitude, "longitude": d.longitude}
+            for d in destinations
+            if getattr(d, "label", "") and getattr(d, "latitude", None) and getattr(d, "longitude", None)
+        ]
+    except Exception as e:
+        logger.debug(f"[Pipeline] Could not resolve commute destinations: {e}")
+        return []
+
+
 async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
     """Audit location via Geoportal and Air Quality, mapping returned fields onto target.
 
@@ -68,9 +85,16 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
         lat=coords[0],
         lon=coords[1],
         city=city,
+        custom_destinations=_get_configured_commute_destinations(),
     )
+    seller_name = getattr(target, "developer_name", None) or getattr(target, "contact_person", None)
+    seller_nip = getattr(target, "developer_nip", None)
+    is_priv = getattr(target, "is_private_owner", None)
     dev_coro = developer_verifier.audit_developer(
         description=raw_desc,
+        seller_name=seller_name,
+        explicit_nip=seller_nip,
+        is_private_owner=is_priv,
     )
 
     geo_res: Any
@@ -182,6 +206,38 @@ async def audit_vision_data(target: Any) -> dict[str, Any] | None:
             return vision_res
     except Exception as e:
         logger.debug(f"[Pipeline] Vision audit note: {e}")
+    return None
+
+
+async def audit_developer_data(target: Any) -> dict[str, Any] | None:
+    """Audits seller/developer background via Biała Lista VAT and Open KRS API.
+
+    Coordinate-independent: runs on seller metadata, tax IDs, and ad description.
+    """
+    try:
+        from src.models.listing import DEVELOPER_FIELDS
+        from src.services.developer_verifier import developer_verifier
+
+        existing_risk = getattr(target, "developer_risk_level", None)
+        if existing_risk is not None and existing_risk not in ("NIEZNANE", "BRAK_DANYCH"):
+            return None
+
+        raw_desc = getattr(target, "raw_description", "") or ""
+        seller_name = getattr(target, "developer_name", None) or getattr(target, "contact_person", None)
+        seller_nip = getattr(target, "developer_nip", None)
+        is_priv = getattr(target, "is_private_owner", None)
+
+        dev_res = await developer_verifier.audit_developer(
+            description=raw_desc,
+            seller_name=seller_name,
+            explicit_nip=seller_nip,
+            is_private_owner=is_priv,
+        )
+        if isinstance(dev_res, dict):
+            apply_if_present(target, dev_res, DEVELOPER_FIELDS)
+            return dev_res
+    except Exception as e:
+        logger.debug(f"[Pipeline] Standalone developer audit note: {e}")
     return None
 
 
@@ -371,12 +427,16 @@ class ScraperPipeline:
                 except Exception as e:
                     logger.debug(f"[Pipeline] Geoportal/AirQuality audit skipped: {e}")
             else:
-                # Vision needs no coordinates: audit photos even when location is approximate
-                # (audit_vision_data no-ops without gallery or with vision already set).
+                # Vision and Developer audits need no coordinates: audit photos and
+                # seller/developer even when location is approximate.
                 try:
                     await audit_vision_data(listing)
                 except Exception as e:
                     logger.debug(f"[Pipeline] Standalone vision audit skipped: {e}")
+                try:
+                    await audit_developer_data(listing)
+                except Exception as e:
+                    logger.debug(f"[Pipeline] Standalone developer audit skipped: {e}")
 
         # Check if LLM can be skipped because this listing was already analyzed.
         # Uses stable desc_hash (normalized text) + prompt version instead of raw

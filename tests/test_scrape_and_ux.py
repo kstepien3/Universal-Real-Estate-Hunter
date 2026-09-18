@@ -225,6 +225,9 @@ async def test_live_dashboard_generate_ai_audit_endpoint():
         "verdict": "Tak — 6 000 zł/m² to atrakcyjna oferta.",
         "worth_interest": True,
         "questions_for_agent": ["Czy taras wymaga pozwolenia?", "Kiedy odebrano budynek?"],
+        "stakeholder_questions": {"seller": ["Czy taras wymaga pozwolenia?"]},
+        "documents_to_obtain": ["Odpis z KW"],
+        "structured_risks": [{"severity": "SREDNIE", "risk": "Taras", "impact": "Do wykończenia"}],
         "contact_phone": "500600700",
         "contact_person": "Jan Kowalski",
         "finish_condition": "pod_klucz",
@@ -245,6 +248,9 @@ async def test_live_dashboard_generate_ai_audit_endpoint():
             assert data["ai_verdict"] == mock_insights["verdict"]
             assert data["worth_interest"] is True
             assert len(data["ai_questions"]) == 2
+            assert data["stakeholder_questions"] == {"seller": ["Czy taras wymaga pozwolenia?"]}
+            assert data["documents_to_obtain"] == ["Odpis z KW"]
+            assert len(data["structured_risks"]) == 1
             assert data["contact_phone"] == "500600700"
             assert data["finish_condition"] == "do zamieszkania"
 
@@ -566,10 +572,12 @@ def test_config_manager_llm_settings_roundtrip():
         llm_provider="ollama",
         ollama_model="qwen2.5:7b",
         openrouter_model="deepseek/deepseek-chat",
+        vision_timeout_seconds=95.0,
     )
     assert cfg.llm_provider == "ollama"
     assert cfg.ollama_model == "qwen2.5:7b"
     assert cfg.openrouter_model == "deepseek/deepseek-chat"
+    assert cfg.vision_timeout_seconds == 95.0
 
     # Test update_config
     updated = config_manager.update_config(
@@ -577,11 +585,13 @@ def test_config_manager_llm_settings_roundtrip():
             "llm_provider": "openrouter",
             "ollama_model": "llama3.1:8b",
             "openrouter_model": "google/gemini-2.5-flash-lite:nitro",
+            "vision_timeout_seconds": 150.0,
         }
     )
     assert updated.llm_provider == "openrouter"
     assert updated.ollama_model == "llama3.1:8b"
     assert updated.openrouter_model == "google/gemini-2.5-flash-lite:nitro"
+    assert updated.vision_timeout_seconds == 150.0
 
 
 @pytest.mark.asyncio

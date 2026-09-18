@@ -391,6 +391,16 @@ class ListingRepository:
             await self.session.flush()
         return listing
 
+    async def update_user_tags(self, listing_id: int, tags: list[str]) -> ListingModel | None:
+        stmt = select(ListingModel).where(ListingModel.id == listing_id)
+        res = await self.session.execute(stmt)
+        listing = res.scalars().first()
+        if listing:
+            listing.user_tags = tags
+            listing.updated_at = datetime.now(UTC)
+            await self.session.flush()
+        return listing
+
     async def delete_all_listings(self) -> int:
         """Delete all listings and their price histories (full database reset)."""
         stmt = select(ListingModel.id)

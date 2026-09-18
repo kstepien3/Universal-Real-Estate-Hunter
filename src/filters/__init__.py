@@ -415,18 +415,11 @@ class QualificationEngine:
         for defect in list(getattr(listing, "vision_defects", None) or [])[:3]:
             cons.append(f"🔧 [Vision AI] Wada wizualna: {defect}")
 
-        # Commute & pedestrian safety (OSRM + OSM Overpass)
+        # Commute (OSRM)
         drive_min = getattr(listing, "commute_drive_min", None)
         if drive_min is not None and drive_min > 35:
             cons.append(f"🚗 Długi dojazd do centrum ({drive_min} min samochodem) — lokalizacja wymagająca samochodu")
             score -= 5.0
-        if getattr(listing, "pedestrian_sidewalk", None) is False:
-            cons.append(
-                f"🚶 Brak wydzielonego chodnika: {getattr(listing, 'pedestrian_safety_note', None) or 'ruch pieszy poboczem/jezdnią'}"
-            )
-            score -= 5.0
-        elif getattr(listing, "pedestrian_sidewalk", None) is True:
-            pros.append("🚶 Bezpieczny dostęp pieszy (chodnik potwierdzony w OSM)")
 
         # Developer / KRS background check
         dev_level = (getattr(listing, "developer_risk_level", None) or "").upper()

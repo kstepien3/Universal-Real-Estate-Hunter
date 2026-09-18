@@ -59,17 +59,14 @@ def test_vision_render_and_discrepancy():
     assert any("Wada wizualna" in c for c in cons)
 
 
-def test_commute_and_pedestrian_scoring():
+def test_commute_scoring():
     engine = QualificationEngine()
     listing = make_base_listing(
         commute_drive_min=45,
-        pedestrian_sidewalk=False,
-        pedestrian_safety_note="brak chodnika",
     )
     score, pros, cons = engine.apply_spatial_findings(listing, score=100.0, pros=[], cons=[], geo_audit=None)
-    assert score == 90.0
+    assert score == 95.0
     assert any("Długi dojazd" in c for c in cons)
-    assert any("chodnika" in c for c in cons)
 
 
 def test_developer_high_risk_penalty():
@@ -109,7 +106,6 @@ def test_build_prompt_includes_extended_intelligence():
         vision_defects=["Gołe wylewki"],
         commute_drive_min=22,
         commute_drive_km=11.5,
-        pedestrian_safety_note="brak chodnika",
         developer_name="Test Dev Sp. z o.o.",
         developer_risk_level="MEDIUM",
         developer_risk_reasons=["⚠️ Minimalny kapitał"],
@@ -119,7 +115,6 @@ def test_build_prompt_includes_extended_intelligence():
     assert "GUNB" in prompt
     assert "Vision AI" in prompt
     assert "Dojazd do centrum (OSRM)" in prompt
-    assert "Dostęp pieszy (OSM)" in prompt
     assert "Deweloper/KRS" in prompt
     assert "Infrastruktura piesza (OSM)" in prompt
 

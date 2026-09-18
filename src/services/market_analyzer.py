@@ -820,28 +820,6 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
                 }
             )
 
-    # Pedestrian safety finding
-    pedestrian_sidewalk = _prop(listing, "pedestrian_sidewalk", None)
-    pedestrian_note = _prop(listing, "pedestrian_safety_note", None)
-    if pedestrian_sidewalk is True:
-        findings.append(
-            {
-                "badge": "🚶 Bezpieczny Dostęp Pieszy",
-                "title": "Wydzielony chodnik dla pieszych przy posesji",
-                "desc": str(pedestrian_note or "Wydzielony ciąg pieszy oddzielony od jezdni."),
-                "severity": "success",
-            }
-        )
-    elif pedestrian_sidewalk is False:
-        findings.append(
-            {
-                "badge": "⚠️ Brak Chodnika (Ruch Poboczem)",
-                "title": "Brak wydzielonego chodnika dla pieszych",
-                "desc": str(pedestrian_note or "Piesi zmuszeni do poruszania się poboczem lub jezdnią."),
-                "severity": "warning",
-            }
-        )
-
     if dist_center is None:
         commute_verdict = "BRAK PUNKTU ODNIESIENIA DOJAZDU"
         commute_sev = "info"

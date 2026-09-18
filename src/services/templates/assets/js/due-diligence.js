@@ -240,6 +240,49 @@ function renderLandAuditHtml(item) {
                     </tbody>
                 </table>
                 <div class="nego-note">${negoNoteHtml}</div>
+                <div class="mortgage-sim-box">
+                    <div class="mortgage-sim-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M7 7h10M7 11h10M7 15h4M15 15h2"/></svg>
+                        <span>Kalkulator raty kredytu (symulacja finansowa)</span>
+                    </div>
+                    <div class="mortgage-grid">
+                        <div class="mortgage-field">
+                            <label for="mortgageBasePrice">Kwota bazowa (PLN)</label>
+                            <input type="number" id="mortgageBasePrice" value="${Math.round(tco.total_acquisition_cost || item.price || 800000)}" step="10000" oninput="recalcMortgage()">
+                        </div>
+                        <div class="mortgage-field">
+                            <label for="mortgageOwnPct">Wkład własny (%)</label>
+                            <input type="number" id="mortgageOwnPct" value="20" min="10" max="90" step="5" oninput="recalcMortgage()">
+                        </div>
+                        <div class="mortgage-field">
+                            <label for="mortgageYears">Okres spłaty</label>
+                            <select id="mortgageYears" onchange="recalcMortgage()">
+                                <option value="15">15 lat</option>
+                                <option value="20">20 lat</option>
+                                <option value="25" selected>25 lat</option>
+                                <option value="30">30 lat</option>
+                            </select>
+                        </div>
+                        <div class="mortgage-field">
+                            <label for="mortgageRate">Oprocentowanie (%)</label>
+                            <input type="number" id="mortgageRate" value="7.2" step="0.1" min="1" max="25" oninput="recalcMortgage()">
+                        </div>
+                    </div>
+                    <div class="mortgage-results" id="mortgageResultsBox">
+                        <div class="mortgage-res-item">
+                            <span class="mortgage-res-label">Rata miesięczna</span>
+                            <span class="mortgage-res-value" id="mortgageMonthlyPay">— zł</span>
+                        </div>
+                        <div class="mortgage-res-item">
+                            <span class="mortgage-res-label">Kredyt / Wkład</span>
+                            <span class="mortgage-res-sub" id="mortgageLoanAmount">—</span>
+                        </div>
+                        <div class="mortgage-res-item">
+                            <span class="mortgage-res-label">Koszt odsetek</span>
+                            <span class="mortgage-res-sub" id="mortgageTotalInterest">—</span>
+                        </div>
+                    </div>
+                </div>
             </div>
         `;
     }
@@ -257,6 +300,23 @@ function renderLandAuditHtml(item) {
             </div>
         `).join('');
 
+        const customCommute = item.commute_custom || {};
+        const customEntries = Object.entries(customCommute);
+        const customCommuteHtml = customEntries.length
+            ? `<div class="custom-commute-box">
+                    <div class="custom-commute-title">Twoje cele dojazdów (OSRM)</div>
+                    <table class="dd-table">
+                        <tbody>
+                            ${customEntries.map(([label, v]) => `
+                            <tr>
+                                <th>${escapeHtml(label)}</th>
+                                <td class="value"><span class="num">${Math.round(v.min)} min</span> · ${Number(v.km).toFixed(1)} km</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+               </div>`
+            : '';
+
         commuteHtml = `
             <div class="audit-block">
                 <div class="audit-block-head">
@@ -264,6 +324,7 @@ function renderLandAuditHtml(item) {
                     <span class="audit-verdict-badge ${getSeverityBadgeClass(commute.severity)}">${escapeHtml(commute.verdict)}</span>
                 </div>
                 <div class="audit-finding-list">${commuteFindings}</div>
+                ${customCommuteHtml}
                 <div class="audit-actions">
                     ${(item.latitude && item.longitude) ? `
                     <a href="https://www.google.com/maps/dir/?api=1&destination=${item.latitude},${item.longitude}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Wyznacz trasę dojazdu w Google Maps">
@@ -499,31 +560,72 @@ function renderLandAuditHtml(item) {
 
     // 8. Developer / KRS background check
     let developerHtml = '';
-    if (item.developer_name || item.developer_nip || item.developer_krs || item.developer_risk_level) {
-        const devLevel = (item.developer_risk_level || 'NIEZNANE').toUpperCase();
-        const devBadge = devLevel === 'HIGH' ? 'audit-verdict-danger' : (devLevel === 'MEDIUM' ? 'audit-verdict-warning' : (devLevel === 'LOW' ? 'audit-verdict-success' : 'audit-verdict-warning'));
-        const devCls = devLevel === 'HIGH' ? 'row-danger' : (devLevel === 'MEDIUM' ? 'row-warn' : 'row-ok');
-        const devReasons = (item.developer_risk_reasons || []).map(r => `<tr class="${devLevel === 'LOW' ? 'row-ok' : 'row-warn'}"><th>Ocena</th><td class="value">${escapeHtml(r)}</td></tr>`).join('');
-        const krsLink = item.developer_krs ? `https://wyszukiwarka-krs.ms.gov.pl/` : null;
+    if (item.developer_name || item.developer_nip || item.developer_krs || item.developer_risk_level || item.is_private_owner) {
+        const devLevel = (item.developer_risk_level || (item.is_private_owner ? 'PRIVATE' : 'NIEZNANE')).toUpperCase();
+        let devBadge = 'audit-verdict-warning';
+        let devCls = 'row-warn';
+        let devLabel = devLevel;
+
+        if (devLevel === 'PRIVATE') {
+            devBadge = 'audit-verdict-info';
+            devCls = 'row-ok';
+            devLabel = 'OFERTA PRYWATNA';
+        } else if (devLevel === 'LOW') {
+            devBadge = 'audit-verdict-success';
+            devCls = 'row-ok';
+            devLabel = 'NISKIE RYZYKO';
+        } else if (devLevel === 'HIGH') {
+            devBadge = 'audit-verdict-danger';
+            devCls = 'row-danger';
+            devLabel = 'WYSOKIE RYZYKO';
+        } else if (devLevel === 'MEDIUM') {
+            devBadge = 'audit-verdict-warning';
+            devCls = 'row-warn';
+            devLabel = 'ŚREDNIE RYZYKO';
+        } else if (devLevel === 'BRAK_NIP') {
+            devBadge = 'audit-verdict-warning';
+            devCls = 'row-warn';
+            devLabel = 'BRAK NIP (DO WERYFIKACJI)';
+        } else {
+            devBadge = 'audit-verdict-warning';
+            devCls = 'row-warn';
+            devLabel = 'NIEZWERYFIKOWANY';
+        }
+
+        const devReasons = (item.developer_risk_reasons || []).map(r => `<tr class="${devLevel === 'LOW' || devLevel === 'PRIVATE' ? 'row-ok' : 'row-warn'}"><th>Ocena</th><td class="value">${escapeHtml(r)}</td></tr>`).join('');
+
+        let searchLink = null;
+        let searchLabel = 'Wyszukiwarka KRS';
+        if (item.developer_krs) {
+            searchLink = `https://rejestr.io/krs?q=${encodeURIComponent(item.developer_krs)}`;
+            searchLabel = `KRS: ${escapeHtml(item.developer_krs)}`;
+        } else if (item.developer_nip) {
+            searchLink = `https://rejestr.io/krs?q=${encodeURIComponent(item.developer_nip)}`;
+            searchLabel = `Szukaj NIP: ${escapeHtml(item.developer_nip)}`;
+        } else if (item.developer_name && devLevel !== 'PRIVATE') {
+            searchLink = `https://rejestr.io/krs?q=${encodeURIComponent(item.developer_name)}`;
+            searchLabel = `Szukaj podmiotu w KRS / Rejestr.io`;
+        }
+
         developerHtml = `
             <div class="audit-block">
                 <div class="audit-block-head">
                     <div class="audit-block-title">Deweloper / sprzedawca (KRS)</div>
-                    <span class="audit-verdict-badge ${devBadge}">${escapeHtml(devLevel)}</span>
+                    <span class="audit-verdict-badge ${devBadge}">${escapeHtml(devLabel)}</span>
                 </div>
                 <table class="dd-table">
-                    ${item.developer_name ? `<tr><th>Podmiot</th><td class="value">${escapeHtml(item.developer_name)}</td></tr>` : ''}
+                    ${item.developer_name ? `<tr><th>Podmiot / Sprzedawca</th><td class="value">${escapeHtml(item.developer_name)}</td></tr>` : (item.is_private_owner ? `<tr><th>Typ sprzedaży</th><td class="value">Bezpośrednio od właściciela (osoba fizyczna)</td></tr>` : '')}
                     ${item.developer_nip ? `<tr><th>NIP</th><td class="value"><span class="num">${escapeHtml(item.developer_nip)}</span></td></tr>` : ''}
                     ${item.developer_krs ? `<tr><th>KRS</th><td class="value"><span class="num">${escapeHtml(item.developer_krs)}</span></td></tr>` : ''}
                     ${item.developer_capital_pln ? `<tr><th>Kapitał zakładowy</th><td class="value"><span class="num">${Number(item.developer_capital_pln).toLocaleString('pl-PL')} zł</span></td></tr>` : ''}
                     ${item.developer_registration_year ? `<tr><th>Rok rejestracji</th><td class="value"><span class="num">${item.developer_registration_year}</span></td></tr>` : ''}
-                    <tr class="${devCls}"><th>Poziom ryzyka</th><td class="value">${escapeHtml(devLevel)}</td></tr>
+                    <tr class="${devCls}"><th>Status weryfikacji</th><td class="value">${escapeHtml(devLabel)}</td></tr>
                     ${devReasons}
                 </table>
-                ${krsLink ? `
-                <div class="audit-actions">
-                    <a href="${krsLink}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz wyszukiwarkę KRS (uzupełnij numer KRS)">
-                        ${svgIcon('external')} Wyszukiwarka KRS
+                ${searchLink ? `
+                <div class="audit-actions" style="margin-top:8px;">
+                    <a href="${searchLink}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Sprawdź podmiot w bazie Rejestr.io / KRS">
+                        ${svgIcon('external')} ${searchLabel}
                     </a>
                 </div>` : ''}
             </div>
@@ -562,7 +664,7 @@ function getSeverityBadgeClass(sev) {
 // ========================
 let currentAiItem = null;
 
-async function openAiModal(listingId) {
+async function openAiModal(listingId, forceRefresh = false) {
     const item = allListings.find(i => i.id === listingId);
     if (!item) return;
     currentAiItem = item;
@@ -573,8 +675,8 @@ async function openAiModal(listingId) {
 
     document.getElementById('aiModalTitle').innerText = item.title || '';
 
-    // Lazy-load the full audit payload (land_audit, negotiation_arguments) once.
-    if (!item._detailLoaded) {
+    // Lazy-load the full audit payload (land_audit, negotiation_arguments).
+    if (!item._detailLoaded || forceRefresh) {
         try {
             const full = await Transport.listingDetail(listingId);
             if (full && typeof full === 'object') {
@@ -629,12 +731,29 @@ async function openAiModal(listingId) {
         `;
     }
 
-    // Spatial / financial / legal audit
+    // Spatial / financial / legal / vision intelligence audit
     const spatialSection = document.getElementById('aiSpatialSection');
     const spatialContent = document.getElementById('aiSpatialContent');
-    if (item.parcel_id || item.mpzp_zone || item.flood_risk_zone || item.geoportal_url || (item.latitude && item.longitude) || item.land_audit) {
+    const hasSpatialOrIntel = Boolean(
+        item.parcel_id
+        || item.mpzp_zone
+        || item.flood_risk_zone
+        || item.geoportal_url
+        || (item.latitude && item.longitude)
+        || item.land_audit
+        || item.vision_finish_condition
+        || (item.gunb_permits && item.gunb_permits.length)
+        || (item.gunb_risk_flags && item.gunb_risk_flags.length)
+        || item.developer_name
+        || item.developer_nip
+        || item.developer_risk_level
+        || item.is_private_owner
+        || (item.commute_drive_min !== null && item.commute_drive_min !== undefined)
+    );
+    if (hasSpatialOrIntel) {
         spatialSection.style.display = 'flex';
         spatialContent.innerHTML = renderLandAuditHtml(item);
+        recalcMortgage();
     } else {
         spatialSection.style.display = 'none';
     }
@@ -1077,10 +1196,14 @@ async function triggerAiAuditForCurrentItem() {
             throw new Error(err.error || `Błąd serwera (${resp.status})`);
         }
         const data = await resp.json();
+        item._detailLoaded = false;
         Object.assign(item, data);
         const inList = allListings.find(i => i.id === item.id);
-        if (inList) Object.assign(inList, data);
-        openAiModal(item.id);
+        if (inList) {
+            inList._detailLoaded = false;
+            Object.assign(inList, data);
+        }
+        await openAiModal(item.id, true);
         showToast('Raport AI został pomyślnie wygenerowany!');
     } catch (err) {
         showToast('Błąd generowania raportu AI: ' + err.message);
@@ -1101,3 +1224,41 @@ async function triggerAiAuditForCurrentItem() {
         }
     }
 }
+
+function recalcMortgage() {
+    const priceInput = document.getElementById('mortgageBasePrice');
+    const ownInput = document.getElementById('mortgageOwnPct');
+    const yearsInput = document.getElementById('mortgageYears');
+    const rateInput = document.getElementById('mortgageRate');
+    const monthlyEl = document.getElementById('mortgageMonthlyPay');
+    const loanEl = document.getElementById('mortgageLoanAmount');
+    const interestEl = document.getElementById('mortgageTotalInterest');
+
+    if (!priceInput || !monthlyEl) return;
+
+    const price = Math.max(0, parseFloat(priceInput.value) || 0);
+    const ownPct = Math.min(95, Math.max(0, parseFloat(ownInput ? ownInput.value : 20) || 20));
+    const years = Math.max(1, parseInt(yearsInput ? yearsInput.value : 25, 10) || 25);
+    const annualRate = Math.max(0.1, parseFloat(rateInput ? rateInput.value : 7.2) || 7.2);
+
+    const loanAmount = Math.max(0, price * (1 - ownPct / 100));
+    const monthlyRate = (annualRate / 100) / 12;
+    const totalMonths = years * 12;
+
+    let monthlyPayment = 0;
+    if (loanAmount > 0) {
+        if (monthlyRate > 0) {
+            monthlyPayment = loanAmount * (monthlyRate * Math.pow(1 + monthlyRate, totalMonths)) / (Math.pow(1 + monthlyRate, totalMonths) - 1);
+        } else {
+            monthlyPayment = loanAmount / totalMonths;
+        }
+    }
+
+    const totalRepay = monthlyPayment * totalMonths;
+    const totalInterest = Math.max(0, totalRepay - loanAmount);
+
+    monthlyEl.textContent = `${Math.round(monthlyPayment).toLocaleString('pl-PL')} zł / mc`;
+    if (loanEl) loanEl.textContent = `${Math.round(loanAmount).toLocaleString('pl-PL')} zł (wkład: ${Math.round(price * (ownPct / 100)).toLocaleString('pl-PL')} zł)`;
+    if (interestEl) interestEl.textContent = `+${Math.round(totalInterest).toLocaleString('pl-PL')} zł (${Math.round((totalInterest / (loanAmount || 1)) * 100)}%)`;
+}
+window.recalcMortgage = recalcMortgage;
