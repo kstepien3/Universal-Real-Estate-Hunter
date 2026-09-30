@@ -18,6 +18,7 @@ from src.models.enums import (
 )
 from src.models.listing import FilterResult, ListingSchema
 
+from .ai_gate import is_local_engine, local_ai_gate
 from .fingerprint import (
     compute_desc_hash,
     estimate_llm_tokens,
@@ -936,6 +937,8 @@ __all__ = [
     "SUGGESTED_OLLAMA_VISION_MODELS",
     "declared_finish_label",
     "is_local_vision_base",
+    "is_local_engine",
+    "local_ai_gate",
     "is_vision_model",
     "resolve_vision_target",
     "estimate_tokens",

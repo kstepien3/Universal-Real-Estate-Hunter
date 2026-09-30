@@ -12,6 +12,7 @@ from loguru import logger
 from PIL import Image
 
 from config import settings
+from src.filters.ai_gate import is_local_engine, local_ai_gate
 
 SUGGESTED_OLLAMA_VISION_MODELS: list[dict[str, Any]] = [
     {
@@ -107,21 +108,7 @@ def is_vision_model(name: str | None) -> bool:
 
 def is_local_vision_base(base_url: str | None) -> bool:
     """True if the endpoint URL points to a local model engine (Ollama, LM Studio, etc.)."""
-    if not base_url:
-        return False
-    low = base_url.lower()
-    return any(
-        tok in low
-        for tok in (
-            "localhost",
-            "127.0.0.1",
-            "host.docker.internal",
-            "0.0.0.0",
-            ":11434",
-            ":1234",
-            "ollama",
-        )
-    )
+    return is_local_engine(base_url)
 
 
 def _resolve_docker_base(base_url: str) -> str:
@@ -656,12 +643,13 @@ class VisionAnalyzer:
         req_timeout = timeout or self.timeout or cfg_timeout or (120.0 if is_local else 45.0)
 
         try:
-            resp = await client.post(
-                f"{target_base}/chat/completions",
-                json=payload,
-                headers=headers,
-                timeout=req_timeout,
-            )
+            async with local_ai_gate(target_base, task_name=f"Vision AI ({resolved_model})"):
+                resp = await client.post(
+                    f"{target_base}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                    timeout=req_timeout,
+                )
             if resp.status_code == 200:
                 body = resp.json()
                 content = body["choices"][0]["message"]["content"]

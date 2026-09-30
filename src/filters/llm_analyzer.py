@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 
 from config import settings
+from src.filters.ai_gate import local_ai_gate
 from src.filters.vision_analyzer import (
     SUGGESTED_OLLAMA_VISION_MODELS,
     is_local_vision_base,
@@ -967,28 +968,29 @@ class LLMAnalyzer:
                 f"[LLMAnalyzer] Zapytanie do Lokalnego OpenAI/LM Studio ({model_to_use} @ {self.local_llm_base_url}) "
                 f"dla: '{listing.title[:35]}'"
             )
-            client = AsyncOpenAI(
-                api_key=self.local_llm_api_key or "not-needed",
-                base_url=self.local_llm_base_url,
-                timeout=self.local_llm_timeout_seconds,
-            )
-            response = await _chat_completion_with_retry(
-                client,
-                model=model_to_use,
-                messages=[
-                    {"role": "system", "content": _SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=self.local_llm_temperature,
-            )
-            content = response.choices[0].message.content or "{}"
-            result = self._parse_json(content)
-            if result:
-                logger.info(
-                    f"[LLMAnalyzer] Lokalny OpenAI: pomyślnie przeanalizowano '{listing.title[:35]}' "
-                    f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+            async with local_ai_gate(self.local_llm_base_url, task_name=f"Lokalny LLM ({model_to_use})"):
+                client = AsyncOpenAI(
+                    api_key=self.local_llm_api_key or "not-needed",
+                    base_url=self.local_llm_base_url,
+                    timeout=self.local_llm_timeout_seconds,
                 )
-                return result
+                response = await _chat_completion_with_retry(
+                    client,
+                    model=model_to_use,
+                    messages=[
+                        {"role": "system", "content": _SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=self.local_llm_temperature,
+                )
+                content = response.choices[0].message.content or "{}"
+                result = self._parse_json(content)
+                if result:
+                    logger.info(
+                        f"[LLMAnalyzer] Lokalny OpenAI: pomyślnie przeanalizowano '{listing.title[:35]}' "
+                        f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+                    )
+                    return result
         except Exception as e:
             logger.warning(f"[LLMAnalyzer] Błąd lokalnego serwera OpenAI ({self.local_llm_base_url}): {e}")
         return None
@@ -1011,21 +1013,22 @@ class LLMAnalyzer:
                 logger.info(
                     f"[LLMAnalyzer] Zapytanie do Ollama ({self.ollama_model} @ {url}) dla: '{listing.title[:35]}'"
                 )
-                async with httpx.AsyncClient(timeout=timeout) as http_client:
-                    res = await http_client.post(
-                        f"{url}/api/generate",
-                        json={
-                            "model": self.ollama_model,
-                            "prompt": prompt,
-                            "system": _SYSTEM_PROMPT,
-                            "format": "json",
-                            "stream": False,
-                            "options": {
-                                "temperature": self.ollama_temperature,
-                                "num_ctx": self.ollama_num_ctx,
+                async with local_ai_gate(url, task_name=f"Ollama ({self.ollama_model})"):
+                    async with httpx.AsyncClient(timeout=timeout) as http_client:
+                        res = await http_client.post(
+                            f"{url}/api/generate",
+                            json={
+                                "model": self.ollama_model,
+                                "prompt": prompt,
+                                "system": _SYSTEM_PROMPT,
+                                "format": "json",
+                                "stream": False,
+                                "options": {
+                                    "temperature": self.ollama_temperature,
+                                    "num_ctx": self.ollama_num_ctx,
+                                },
                             },
-                        },
-                    )
+                        )
                     if res.status_code == 200:
                         payload = res.json()
                         eval_count = payload.get("eval_count") or 0
