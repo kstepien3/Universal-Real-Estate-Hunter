@@ -6,6 +6,15 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.20.0 (2026-10-08)
+
+### Features
+
+- **ai**: Serialize local engine calls to prevent model thrashing and timeouts
+  ([#33](https://github.com/p-sternik/Universal-Real-Estate-Hunter/pull/33),
+  [`d329604`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/d329604c6764e83904371d4361849b664b862cf6))
+
+
 ## v1.19.0 (2026-09-21)
 
 ### Features
